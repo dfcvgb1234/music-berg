@@ -2,7 +2,9 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   serverExternalPackages: ["@electric-sql/pglite"],
-  // Allow large multipart bodies for template MP3 uploads (Node route handlers).
+  // Allow large multipart bodies for template MP3 uploads (Node route handlers /
+  // proxy buffering). Vercel still needs VERCEL_SUPPORT_LARGE_REQUEST_BODY=1
+  // + Performance (4GB) function memory for bodies above ~4.5MB — see docs/vercel.md.
   experimental: {
     proxyClientMaxBodySize: "50mb",
     serverActions: {

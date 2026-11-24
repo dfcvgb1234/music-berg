@@ -11,6 +11,8 @@ import { formatTrackLabel, getTrack, getTracks, trackFingerprint } from "@/lib/i
 import { clientKey, rateLimit } from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
+/** Allow ffmpeg/iTunes work during multi-MP3 create on Vercel. */
+export const maxDuration = 60;
 
 type TemplateRow = {
   id: string;

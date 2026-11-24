@@ -19,7 +19,7 @@ export async function readApiJson<T = { error?: string }>(
       lower.startsWith("request en")
     ) {
       throw new Error(
-        "Upload too large for the hosting proxy. Try fewer/smaller files, or upload songs in a smaller batch.",
+        "Upload too large for Vercel (body over ~4.5MB). Set VERCEL_SUPPORT_LARGE_REQUEST_BODY=1 and Function CPU → Performance (4GB), then redeploy — or use shorter MP3s.",
       );
     }
     const snippet = trimmed.replace(/\s+/g, " ").slice(0, 120);
