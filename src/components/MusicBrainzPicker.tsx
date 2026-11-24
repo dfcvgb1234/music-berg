@@ -74,6 +74,8 @@ export function MusicBrainzPicker({
     return () => clearTimeout(handle);
   }, [query, value]);
 
+  const showResults = open && results.length > 0;
+
   if (value) {
     return (
       <div className="field mb-pick">
@@ -114,66 +116,71 @@ export function MusicBrainzPicker({
   }
 
   return (
-    <div className="field mb-pick" ref={boxRef}>
+    <div
+      className={`field mb-pick${showResults ? " is-open" : ""}`}
+      ref={boxRef}
+    >
       <label htmlFor={id}>{label}</label>
-      <input
-        id={id}
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        onFocus={() => results.length > 0 && setOpen(true)}
-        placeholder={placeholder}
-        autoComplete="off"
-        required
-      />
+      <div className="mb-combobox">
+        <input
+          id={id}
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onFocus={() => results.length > 0 && setOpen(true)}
+          placeholder={placeholder}
+          autoComplete="off"
+          required
+        />
+        {showResults && (
+          <ul className="mb-results" role="listbox">
+            {results.map((hit) => {
+              const labelText = `${hit.artist} — ${hit.title}`;
+              return (
+                <li key={hit.id}>
+                  <button
+                    type="button"
+                    className="mb-result"
+                    onClick={() => {
+                      onChange({
+                        musicbrainzId: hit.id,
+                        title: hit.title,
+                        artist: hit.artist,
+                        coverArtUrl: hit.coverArtUrl,
+                        label: labelText,
+                      });
+                      setOpen(false);
+                      setQuery("");
+                      setResults([]);
+                    }}
+                  >
+                    {hit.coverArtUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={hit.coverArtUrl}
+                        alt=""
+                        className="mb-cover"
+                        loading="lazy"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).style.visibility =
+                            "hidden";
+                        }}
+                      />
+                    ) : (
+                      <div className="mb-cover mb-cover-empty" aria-hidden />
+                    )}
+                    <span className="mb-result-text">
+                      <strong>{hit.title}</strong>
+                      <span className="muted">{hit.artist}</span>
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
       {loading && <p className="muted">Searching MusicBrainz…</p>}
       {error && <p className="error">{error}</p>}
-      {open && results.length > 0 && (
-        <ul className="mb-results" role="listbox">
-          {results.map((hit) => {
-            const labelText = `${hit.artist} — ${hit.title}`;
-            return (
-              <li key={hit.id}>
-                <button
-                  type="button"
-                  className="mb-result"
-                  onClick={() => {
-                    onChange({
-                      musicbrainzId: hit.id,
-                      title: hit.title,
-                      artist: hit.artist,
-                      coverArtUrl: hit.coverArtUrl,
-                      label: labelText,
-                    });
-                    setOpen(false);
-                    setQuery("");
-                    setResults([]);
-                  }}
-                >
-                  {hit.coverArtUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={hit.coverArtUrl}
-                      alt=""
-                      className="mb-cover"
-                      loading="lazy"
-                      onError={(e) => {
-                        (e.target as HTMLImageElement).style.visibility =
-                          "hidden";
-                      }}
-                    />
-                  ) : (
-                    <div className="mb-cover mb-cover-empty" aria-hidden />
-                  )}
-                  <span className="mb-result-text">
-                    <strong>{hit.title}</strong>
-                    <span className="muted">{hit.artist}</span>
-                  </span>
-                </button>
-              </li>
-            );
-          })}
-        </ul>
-      )}
       <p className="muted" style={{ margin: 0 }}>
         Pick a MusicBrainz recording — free text is not allowed.
       </p>

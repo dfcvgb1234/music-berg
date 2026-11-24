@@ -91,21 +91,41 @@ textarea {
   align-content: center;
   gap: 1.75rem;
   position: relative;
-  overflow: hidden;
+  /* Allow decorative wash to full-bleed; do not clip at shell width */
+  overflow: visible;
   padding: 1rem 0 2rem;
 }
 
 .hero::before {
   content: "";
   position: absolute;
-  inset: 8% -20% auto auto;
-  width: min(58vw, 520px);
-  height: min(58vw, 520px);
-  border-radius: 40% 60% 55% 45%;
+  /* Full-viewport wash anchored to hero, content layout unchanged */
+  top: -8%;
+  bottom: -8%;
+  left: calc(50% - 50vw);
+  width: 100vw;
+  border-radius: 0;
   background:
-    conic-gradient(from 200deg, rgba(125, 255, 179, 0.35), transparent 40%, rgba(255, 107, 74, 0.28), transparent 75%),
-    radial-gradient(circle at 40% 40%, rgba(200, 245, 96, 0.25), transparent 60%);
-  filter: blur(8px);
+    radial-gradient(ellipse 42% 55% at 78% 40%, rgba(125, 255, 179, 0.32), transparent 70%),
+    radial-gradient(ellipse 36% 48% at 88% 58%, rgba(255, 107, 74, 0.22), transparent 68%),
+    radial-gradient(ellipse 30% 42% at 68% 32%, rgba(200, 245, 96, 0.2), transparent 65%),
+    conic-gradient(from 200deg at 80% 45%, rgba(125, 255, 179, 0.2), transparent 40%, rgba(255, 107, 74, 0.16), transparent 75%);
+  filter: blur(10px);
+  /* Soften left/right so there is no hard vertical edge */
+  -webkit-mask-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    #000 10%,
+    #000 90%,
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    #000 10%,
+    #000 90%,
+    transparent 100%
+  );
   animation: drift 12s ease-in-out infinite alternate;
   pointer-events: none;
   z-index: 0;
@@ -235,12 +255,13 @@ textarea {
   grid-template-columns: 1fr;
   padding: 0.85rem 0;
   border-bottom: 1px solid var(--line);
+  overflow: visible;
 }
 
 @media (min-width: 720px) {
   .song-row {
     grid-template-columns: 1.2fr 1fr auto;
-    align-items: end;
+    align-items: start;
   }
 }
 
@@ -385,18 +406,31 @@ textarea {
 
 .mb-pick {
   position: relative;
+  z-index: 1;
+}
+
+.mb-pick.is-open {
+  z-index: 40;
+}
+
+.mb-combobox {
+  position: relative;
+  z-index: 1;
 }
 
 .mb-results {
   list-style: none;
-  margin: 0.35rem 0 0;
+  margin: 0;
   padding: 0;
   position: absolute;
-  z-index: 20;
+  top: calc(100% + 0.35rem);
   left: 0;
   right: 0;
-  max-height: 280px;
-  overflow: auto;
+  z-index: 50;
+  max-height: min(280px, 45vh);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   background: var(--panel, #12181f);
   border: 1px solid var(--line);
   border-radius: 10px;
