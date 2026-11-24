@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { INITIAL_CLIP_MS } from "@/lib/clipRules";
 import { sql } from "@/lib/db";
 import { broadcastSession, getSessionByCode } from "@/lib/quiz";
 
@@ -29,10 +30,10 @@ export async function POST(
     return NextResponse.json({ error: "Quiz finished" }, { status: 400 });
   }
 
-  // First unlock is 1s; later Play replays the full unlocked segment.
+  // First unlock is 2s; later Play replays the current unlocked segment.
   const nextClip =
-    session.status === "lobby" || session.clip_ms < 1000
-      ? 1000
+    session.status === "lobby" || session.clip_ms < INITIAL_CLIP_MS
+      ? INITIAL_CLIP_MS
       : session.clip_ms;
 
   await sql(

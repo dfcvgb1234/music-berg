@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { INITIAL_CLIP_MS } from "@/lib/clipRules";
 import { sql } from "@/lib/db";
 import { broadcastSession, getSessionByCode } from "@/lib/quiz";
 
@@ -37,10 +38,10 @@ export async function POST(
       `update sessions
        set status = 'lobby',
            current_song_index = $2,
-           clip_ms = 1000,
+           clip_ms = $3,
            play_started_at = null
        where id = $1`,
-      [session.id, nextIndex],
+      [session.id, nextIndex, INITIAL_CLIP_MS],
     );
   }
 

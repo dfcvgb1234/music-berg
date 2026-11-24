@@ -2,9 +2,17 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useEffect, useState } from "react";
-import { HostVisualizer } from "@/components/HostVisualizer";
+import { useEffect, useRef, useState } from "react";
+import {
+  HostVisualizer,
+  type HostVisualizerHandle,
+} from "@/components/HostVisualizer";
 import { Scoreboard } from "@/components/Scoreboard";
+import {
+  EXTEND_CLIP_MS,
+  formatClipSeconds,
+  pointsForClip,
+} from "@/lib/clipRules";
 import { useSessionStream } from "@/lib/useSessionStream";
 
 export function HostRoom() {
@@ -13,6 +21,7 @@ export function HostRoom() {
   const [hostToken, setHostToken] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const vizRef = useRef<HostVisualizerHandle | null>(null);
 
   useEffect(() => {
     setHostToken(localStorage.getItem(`riffrush-host-${code}`));
@@ -25,6 +34,8 @@ export function HostRoom() {
 
   const action = async (path: string) => {
     if (!hostToken) return;
+    // Unlock AudioContext inside the click stack so Play can autoplay after fetch.
+    vizRef.current?.primeAudio();
     setBusy(true);
     setError(null);
     try {
@@ -56,6 +67,9 @@ export function HostRoom() {
     );
   }
 
+  const pointsNow =
+    state?.status === "playing" ? pointsForClip(state.clipMs) : null;
+
   return (
     <main className="host-stage">
       <header className="host-stage-top">
@@ -81,6 +95,9 @@ export function HostRoom() {
                 {Math.min(state.currentSongIndex + 1, state.songCount)} /{" "}
                 {state.songCount}
                 {state.status === "finished" ? " · finished" : ""}
+                {pointsNow != null
+                  ? ` · ${pointsNow} pts if correct`
+                  : ""}
               </p>
 
               {state.revealAnswer && state.currentSongName && (
@@ -90,6 +107,7 @@ export function HostRoom() {
               )}
 
               <HostVisualizer
+                ref={vizRef}
                 code={code}
                 songId={state.currentSongId}
                 clipMs={state.clipMs}
@@ -111,14 +129,16 @@ export function HostRoom() {
                     disabled={busy}
                     onClick={() => action("play")}
                   >
-                    {state.status === "playing" ? "Play unlocked" : "Play 1s"}
+                    {state.status === "playing"
+                      ? "Play unlocked"
+                      : "Play 2s"}
                   </button>
                   <button
                     className="btn secondary"
                     disabled={busy || state.status !== "playing"}
                     onClick={() => action("extend")}
                   >
-                    Unlock +2s
+                    Unlock +{formatClipSeconds(EXTEND_CLIP_MS)}s (−2 pts)
                   </button>
                   <button
                     className="btn secondary"
@@ -146,7 +166,9 @@ export function HostRoom() {
                 state.participants.length > 0 &&
                 state.status === "playing" && (
                   <p className="muted">
-                    Still guessing — unlock more of the track or reveal.
+                    Still guessing — unlock more of the track or reveal. Correct
+                    now is worth {pointsForClip(state.clipMs)} pts (starts at 10,
+                    −2 per unlock).
                   </p>
                 )}
             </>

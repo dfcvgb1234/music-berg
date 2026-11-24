@@ -14,11 +14,11 @@ export function answersMatch(guess: string, answer: string): boolean {
   return g === a || a.includes(g) || g.includes(a);
 }
 
-/** Higher score for shorter clips when the guess lands. */
-export function pointsForClip(clipMs: number): number {
-  if (clipMs <= 1000) return 5;
-  if (clipMs <= 3000) return 4;
-  if (clipMs <= 5000) return 3;
-  if (clipMs <= 7000) return 2;
-  return 1;
-}
+export {
+  EXTEND_CLIP_MS,
+  INITIAL_CLIP_MS,
+  INITIAL_POINTS,
+  POINTS_PER_EXTEND,
+  formatClipSeconds,
+  pointsForClip,
+} from "@/lib/clipRules";

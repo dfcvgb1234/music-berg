@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
 import { TrackPicker, type PickedTrack } from "@/components/TrackPicker";
 import { Scoreboard } from "@/components/Scoreboard";
+import { formatClipSeconds, pointsForClip } from "@/lib/clipRules";
 import { readApiJson } from "@/lib/readApiJson";
 import { useSessionStream } from "@/lib/useSessionStream";
 
@@ -144,9 +145,7 @@ export function PlayRoom() {
                 Song {Math.min(state.currentSongIndex + 1, state.songCount)} /{" "}
                 {state.songCount}
                 {state.status === "playing"
-                  ? ` · host unlocked ${(state.clipMs / 1000).toFixed(
-                      state.clipMs % 1000 === 0 ? 0 : 1,
-                    )}s`
+                  ? ` · host unlocked ${formatClipSeconds(state.clipMs)}s · ${pointsForClip(state.clipMs)} pts`
                   : ""}
               </p>
             )}
@@ -160,7 +159,8 @@ export function PlayRoom() {
                 </div>
                 <p className="muted" style={{ margin: 0 }}>
                   Listen on the host speakers — audio never plays on your
-                  device.
+                  device. Correct now: {pointsForClip(state.clipMs)} pts
+                  (starts at 10, −2 per unlock).
                 </p>
               </>
             )}

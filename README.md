@@ -5,8 +5,8 @@ Realtime music quiz: short clips, longer extends, race the room to name the trac
 ## Flow
 
 1. **Frontpage** — Participate or Start new quiz.
-2. **Host** — Pick a track list (or create a new one) → get a 6-digit room code → Play (1s) / Extend (+2s) / Reveal / Next. **Audio plays only on the host.**
-3. **Participants** — Join with code + display name → listen on the host speakers → pick the track from search results (remasters/soundtrack cuts are deduped; equivalent variants still count as correct).
+2. **Host** — Pick a track list (or create a new one) → get a 6-digit room code → Play (2s) / Unlock (+2s, −2 pts) / Reveal / Next. **Audio plays only on the host.**
+3. **Participants** — Join with code + display name → listen on the host speakers → pick the track from search results (remasters/soundtrack cuts are deduped; equivalent variants still count as correct). Scoring starts at **10 pts**, **−2** per unlock.
 
 ## Notes
 

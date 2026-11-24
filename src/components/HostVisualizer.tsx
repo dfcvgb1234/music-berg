@@ -1,33 +1,45 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useImperativeHandle, useRef, useState, forwardRef } from "react";
+import { INITIAL_CLIP_MS, formatClipSeconds } from "@/lib/clipRules";
 
 const BAR_COUNT = 64;
 const TIMELINE_MAX_MS = 30000;
 
-export function HostVisualizer({
-  code,
-  songId,
-  clipMs,
-  playToken,
-  active,
-  revealed,
-  coverArtUrl,
-  hostToken,
-  onPlay,
-  busy,
-}: {
-  code: string;
-  songId: string | null;
-  clipMs: number;
-  playToken: number;
-  active: boolean;
-  revealed: boolean;
-  coverArtUrl: string | null;
-  hostToken: string;
-  onPlay: () => void;
-  busy: boolean;
-}) {
+export type HostVisualizerHandle = {
+  /** Call synchronously inside a click handler to unlock autoplay. */
+  primeAudio: () => void;
+};
+
+export const HostVisualizer = forwardRef<
+  HostVisualizerHandle,
+  {
+    code: string;
+    songId: string | null;
+    clipMs: number;
+    playToken: number;
+    active: boolean;
+    revealed: boolean;
+    coverArtUrl: string | null;
+    hostToken: string;
+    onPlay: () => void;
+    busy: boolean;
+  }
+>(function HostVisualizer(
+  {
+    code,
+    songId,
+    clipMs,
+    playToken,
+    active,
+    revealed,
+    coverArtUrl,
+    hostToken,
+    onPlay,
+    busy,
+  },
+  ref,
+) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const ctxRef = useRef<AudioContext | null>(null);
@@ -37,6 +49,7 @@ export function HostVisualizer({
   const stopTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined,
   );
+  const playGenRef = useRef(0);
 
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
   const [playing, setPlaying] = useState(false);
@@ -44,6 +57,40 @@ export function HostVisualizer({
   const [durationMs, setDurationMs] = useState(0);
   const [needsGesture, setNeedsGesture] = useState(false);
   const [coverIn, setCoverIn] = useState(false);
+
+  const ensureGraph = () => {
+    const audio = audioRef.current;
+    if (!audio) return null;
+    if (!ctxRef.current) {
+      const Ctx =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext })
+          .webkitAudioContext;
+      const ctx = new Ctx();
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 128;
+      analyser.smoothingTimeConstant = 0.72;
+      // Single stable <audio> element — createMediaElementSource only once.
+      const source = ctx.createMediaElementSource(audio);
+      source.connect(analyser);
+      analyser.connect(ctx.destination);
+      ctxRef.current = ctx;
+      analyserRef.current = analyser;
+      sourceRef.current = source;
+    }
+    return { ctx: ctxRef.current, analyser: analyserRef.current! };
+  };
+
+  const primeAudio = () => {
+    try {
+      const graph = ensureGraph();
+      void graph?.ctx.resume();
+    } catch {
+      // Ignored — play() will surface needsGesture if still blocked.
+    }
+  };
+
+  useImperativeHandle(ref, () => ({ primeAudio }), []);
 
   useEffect(() => {
     if (revealed && coverArtUrl) {
@@ -54,6 +101,7 @@ export function HostVisualizer({
     setCoverIn(false);
   }, [revealed, coverArtUrl, playToken]);
 
+  // Fetch clip/full track when host play token advances.
   useEffect(() => {
     if (!songId || !active || playToken <= 0) {
       setObjectUrl((prev) => {
@@ -84,23 +132,20 @@ export function HostVisualizer({
     };
   }, [code, songId, clipMs, playToken, active, hostToken, revealed]);
 
-  const ensureGraph = () => {
+  // Keep one <audio> element; swap src instead of remounting (fixes WebAudio graph).
+  useEffect(() => {
     const audio = audioRef.current;
-    if (!audio) return null;
-    if (!ctxRef.current) {
-      const ctx = new AudioContext();
-      const analyser = ctx.createAnalyser();
-      analyser.fftSize = 128;
-      analyser.smoothingTimeConstant = 0.72;
-      const source = ctx.createMediaElementSource(audio);
-      source.connect(analyser);
-      analyser.connect(ctx.destination);
-      ctxRef.current = ctx;
-      analyserRef.current = analyser;
-      sourceRef.current = source;
+    if (!audio) return;
+    if (!objectUrl) {
+      audio.removeAttribute("src");
+      audio.load();
+      return;
     }
-    return { ctx: ctxRef.current, analyser: analyserRef.current! };
-  };
+    if (audio.src !== objectUrl) {
+      audio.src = objectUrl;
+      audio.load();
+    }
+  }, [objectUrl]);
 
   const draw = () => {
     const canvas = canvasRef.current;
@@ -133,9 +178,12 @@ export function HostVisualizer({
           : 0;
       const synth =
         0.35 +
-        0.45 * Math.abs(Math.sin(now * 6.2 + i * 0.55)) *
+        0.45 *
+          Math.abs(Math.sin(now * 6.2 + i * 0.55)) *
           Math.abs(Math.cos(now * 3.1 + i * 0.2));
-      const sample = playing ? Math.max(measured, synth * 0.85) : 0.12 + measured * 0.1;
+      const sample = playing
+        ? Math.max(measured, synth * 0.85)
+        : 0.12 + measured * 0.1;
       const amp = playing ? 0.22 + sample * 0.7 : 0.14 + sample * 0.12;
       const outer = innerR + size * amp * 0.26;
       const x0 = cx + Math.cos(angle) * (innerR + 6);
@@ -168,7 +216,9 @@ export function HostVisualizer({
       const audio = audioRef.current;
       if (audio && !audio.paused) {
         const cap = revealed
-          ? (Number.isFinite(audio.duration) ? audio.duration * 1000 : positionMs)
+          ? Number.isFinite(audio.duration)
+            ? audio.duration * 1000
+            : positionMs
           : clipMs;
         setPositionMs(Math.min(cap || clipMs, audio.currentTime * 1000));
         if (Number.isFinite(audio.duration) && audio.duration > 0) {
@@ -188,27 +238,50 @@ export function HostVisualizer({
       if (!revealed) onPlay();
       return;
     }
+    const gen = ++playGenRef.current;
     try {
       const graph = ensureGraph();
-      await graph?.ctx.resume();
+      if (graph?.ctx.state === "suspended") {
+        await graph.ctx.resume();
+      }
       if (stopTimerRef.current) clearTimeout(stopTimerRef.current);
       audio.pause();
       audio.currentTime = 0;
       setPositionMs(0);
+      // Wait briefly for media to be ready after src swap.
+      if (audio.readyState < 2) {
+        await new Promise<void>((resolve) => {
+          const onReady = () => {
+            audio.removeEventListener("canplay", onReady);
+            resolve();
+          };
+          audio.addEventListener("canplay", onReady);
+          window.setTimeout(() => {
+            audio.removeEventListener("canplay", onReady);
+            resolve();
+          }, 1500);
+        });
+      }
+      if (gen !== playGenRef.current) return;
       await audio.play();
       setPlaying(true);
       setNeedsGesture(false);
       if (!revealed) {
         stopTimerRef.current = setTimeout(() => {
+          if (gen !== playGenRef.current) return;
           audio.pause();
           setPlaying(false);
           setPositionMs(clipMs);
         }, Math.max(200, clipMs));
       } else {
-        audio.onended = () => setPlaying(false);
+        audio.onended = () => {
+          if (gen !== playGenRef.current) return;
+          setPlaying(false);
+        };
       }
     } catch {
       setNeedsGesture(true);
+      setPlaying(false);
     }
   };
 
@@ -216,6 +289,7 @@ export function HostVisualizer({
     if (!objectUrl || !active || playToken <= 0) return;
     void runUnlocked();
     return () => {
+      playGenRef.current += 1;
       if (stopTimerRef.current) clearTimeout(stopTimerRef.current);
       audioRef.current?.pause();
       setPlaying(false);
@@ -229,13 +303,15 @@ export function HostVisualizer({
   const unlockedPct = revealed
     ? 100
     : Math.min(100, (clipMs / TIMELINE_MAX_MS) * 100);
-  const posPct = Math.min(
-    unlockedPct,
-    (positionMs / timelineMax) * 100,
-  );
+  const posPct = Math.min(unlockedPct, (positionMs / timelineMax) * 100);
   const unlockedLabel = revealed
     ? "Full track"
-    : `${(clipMs / 1000).toFixed(clipMs % 1000 === 0 ? 0 : 1)}s unlocked`;
+    : !active
+      ? `Ready · first unlock ${formatClipSeconds(INITIAL_CLIP_MS)}s`
+      : `${formatClipSeconds(clipMs)}s unlocked`;
+  const unlockedPctDisplay = !active && !revealed
+    ? Math.min(100, (INITIAL_CLIP_MS / TIMELINE_MAX_MS) * 100)
+    : unlockedPct;
 
   return (
     <div className="host-deck">
@@ -255,6 +331,7 @@ export function HostVisualizer({
             className="host-play-btn"
             disabled={busy || !songId}
             onClick={() => {
+              primeAudio();
               if (active && objectUrl) void runUnlocked();
               else onPlay();
             }}
@@ -265,19 +342,18 @@ export function HostVisualizer({
         )}
       </div>
 
-      {objectUrl && (
-        <audio ref={audioRef} src={objectUrl} preload="auto" playsInline />
-      )}
+      {/* Always mounted so Web Audio can attach once and src can swap. */}
+      <audio ref={audioRef} preload="auto" playsInline />
 
       <div className="host-timeline" aria-label={unlockedLabel}>
         <div className="host-timeline-track">
           <div
             className="host-timeline-unlocked"
-            style={{ width: `${unlockedPct}%` }}
+            style={{ width: `${unlockedPctDisplay}%` }}
           />
           <div
             className="host-timeline-pointer"
-            style={{ left: `${posPct}%` }}
+            style={{ left: `${!active && !revealed ? 0 : posPct}%` }}
           />
         </div>
         <div className="host-timeline-meta">
@@ -292,10 +368,17 @@ export function HostVisualizer({
       </div>
 
       {needsGesture && (
-        <button type="button" className="btn secondary" onClick={() => void runUnlocked()}>
+        <button
+          type="button"
+          className="btn secondary"
+          onClick={() => {
+            primeAudio();
+            void runUnlocked();
+          }}
+        >
           Tap to enable sound
         </button>
       )}
     </div>
   );
-}
+});
