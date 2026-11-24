@@ -117,8 +117,9 @@ export function TrackPicker({
       onAnswersChange?.([...answers, pick]);
       setAddingExtra(false);
     } else {
+      // Primary pick only — parent clears extras in onChange to avoid a
+      // stale onAnswersChange([]) racing and wiping the new selection.
       onChange(pick);
-      onAnswersChange?.([]);
     }
     setOpen(false);
     setQuery("");

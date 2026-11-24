@@ -157,14 +157,18 @@ export function CreateTrackListForm({
               answers={song.extraAnswers}
               multi
               onChange={(pick) => {
-                const next = [...songs];
-                next[index] = { ...song, pick, extraAnswers: [] };
-                setSongs(next);
+                setSongs((prev) => {
+                  const next = [...prev];
+                  next[index] = { ...next[index], pick, extraAnswers: [] };
+                  return next;
+                });
               }}
               onAnswersChange={(extraAnswers) => {
-                const next = [...songs];
-                next[index] = { ...song, extraAnswers };
-                setSongs(next);
+                setSongs((prev) => {
+                  const next = [...prev];
+                  next[index] = { ...next[index], extraAnswers };
+                  return next;
+                });
               }}
               placeholder="Search title or artist…"
             />
@@ -176,9 +180,11 @@ export function CreateTrackListForm({
                 accept="audio/mpeg,audio/mp3,.mp3,audio/*"
                 onChange={(e) => {
                   const file = e.target.files?.[0] ?? null;
-                  const next = [...songs];
-                  next[index] = { ...song, file };
-                  setSongs(next);
+                  setSongs((prev) => {
+                    const next = [...prev];
+                    next[index] = { ...next[index], file };
+                    return next;
+                  });
                 }}
                 required
               />
