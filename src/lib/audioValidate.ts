@@ -1,5 +1,3 @@
-import { uploadLimits } from "@/lib/uploadLimits";
-
 export { formatBytes, uploadLimits } from "@/lib/uploadLimits";
 
 /** True if buffer looks like MP3 (ID3 tag or MPEG frame sync). */
@@ -31,5 +29,3 @@ export function assertUploadAuthorized(request: Request): Response | null {
   }
   return null;
 }
-
-void uploadLimits;

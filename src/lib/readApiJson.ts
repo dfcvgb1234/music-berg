@@ -19,7 +19,7 @@ export async function readApiJson<T = { error?: string }>(
       lower.startsWith("request en")
     ) {
       throw new Error(
-        "Upload too large for the server. Use shorter/smaller MP3s (under ~700KB each, ~900KB total).",
+        "Upload too large for the hosting proxy. Try fewer/smaller files, or upload songs in a smaller batch.",
       );
     }
     const snippet = trimmed.replace(/\s+/g, " ").slice(0, 120);
