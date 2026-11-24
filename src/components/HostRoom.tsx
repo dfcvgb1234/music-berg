@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
-import { ClipPlayer } from "@/components/ClipPlayer";
+import { useEffect, useState } from "react";
+import { HostVisualizer } from "@/components/HostVisualizer";
 import { Scoreboard } from "@/components/Scoreboard";
 import { useSessionStream } from "@/lib/useSessionStream";
 
@@ -22,12 +22,6 @@ export function HostRoom() {
     hostToken,
     enabled: Boolean(hostToken),
   });
-
-  const clipLabel = useMemo(() => {
-    if (!state) return "";
-    const secs = state.clipMs / 1000;
-    return `${secs.toFixed(secs % 1 === 0 ? 0 : 1)}s clip`;
-  }, [state]);
 
   const action = async (path: string) => {
     if (!hostToken) return;
@@ -63,91 +57,78 @@ export function HostRoom() {
   }
 
   return (
-    <main className="shell">
-      <div className="topbar">
-        <Link href="/" className="brand brand-md">
-          RiffRush
-        </Link>
-        <span className="badge">{connected ? "Live" : "Reconnecting…"}</span>
+    <main className="host-stage">
+      <div className="host-stage-bg" aria-hidden>
+        <div className="host-stage-grid" />
+        <div className="host-stage-orb host-stage-orb-a" />
+        <div className="host-stage-orb host-stage-orb-b" />
+        <div className="host-stage-orb host-stage-orb-c" />
       </div>
 
-      <div className="layout-split">
-        <section className="stack">
-          <div>
-            <p className="muted" style={{ margin: 0 }}>
-              Room code
-            </p>
-            <div className="code-pill">{code}</div>
-            <p className="muted">
-              Players join at Participate with this code.
-            </p>
-          </div>
+      <header className="host-stage-top">
+        <Link href="/" className="brand brand-md host-stage-brand">
+          RiffRush
+        </Link>
+        <div className="host-code-block">
+          <p className="host-code-label">Join with code</p>
+          <div className="code-pill host-code-xl">{code}</div>
+          <p className="muted host-code-hint">
+            Players open Participate on their phone
+          </p>
+        </div>
+        <span className="badge">{connected ? "Live" : "Reconnecting…"}</span>
+      </header>
 
+      <div className="host-stage-body">
+        <section className="host-stage-center">
           {state && (
-            <div className="surface stack">
-              <div style={{ display: "flex", justifyContent: "space-between", gap: "1rem", flexWrap: "wrap" }}>
-                <div>
-                  <h3 style={{ margin: 0 }}>{state.templateName}</h3>
-                  <p className="muted" style={{ margin: "0.35rem 0 0" }}>
-                    Song {Math.min(state.currentSongIndex + 1, state.songCount)} of{" "}
-                    {state.songCount}
-                    {state.status === "finished" ? " — finished" : ""}
-                  </p>
-                </div>
-                <div className="badge">{clipLabel || "Ready"}</div>
-              </div>
-
-              {state.status === "playing" && (
-                <div className="wave" aria-hidden>
-                  <i /><i /><i /><i /><i />
-                </div>
-              )}
-
-              <div className="clip-meter" aria-hidden>
-                <span
-                  style={{
-                    width: `${Math.min(100, (state.clipMs / 15000) * 100)}%`,
-                  }}
-                />
-              </div>
+            <>
+              <p className="host-round-meta">
+                {state.templateName} · Song{" "}
+                {Math.min(state.currentSongIndex + 1, state.songCount)} /{" "}
+                {state.songCount}
+                {state.status === "finished" ? " · finished" : ""}
+              </p>
 
               {(state.hostSongName || state.currentSongName) && (
-                <p className="ok-msg" style={{ fontSize: "1.15rem" }}>
-                  Track: {state.hostSongName || state.currentSongName}
+                <p className="ok-msg host-track-name">
+                  {state.hostSongName || state.currentSongName}
                 </p>
               )}
 
-              <ClipPlayer
+              <HostVisualizer
                 code={code}
                 songId={state.currentSongId}
                 clipMs={state.clipMs}
                 playToken={state.playToken}
                 active={state.status === "playing"}
                 hostToken={hostToken}
+                busy={busy}
+                onPlay={() => action("play")}
               />
 
               {state.status !== "finished" && (
-                <div className="actions">
+                <div className="host-controls">
                   <button
-                    className="btn"
+                    className="btn host-ctrl-primary"
                     disabled={busy}
                     onClick={() => action("play")}
                   >
-                    {state.status === "playing" ? "Replay 1s" : "Play 1s"}
+                    {state.status === "playing" ? "Play unlocked" : "Play 1s"}
                   </button>
                   <button
                     className="btn secondary"
                     disabled={busy || state.status !== "playing"}
                     onClick={() => action("extend")}
                   >
-                    Extend +2s
+                    Unlock +2s
                   </button>
                   <button
                     className="btn secondary"
                     disabled={busy || state.status === "lobby"}
                     onClick={() => action("reveal")}
                   >
-                    Reveal title
+                    Reveal
                   </button>
                   <button
                     className="btn danger"
@@ -155,7 +136,7 @@ export function HostRoom() {
                     onClick={() => action("next")}
                   >
                     {state.currentSongIndex + 1 >= state.songCount
-                      ? "Finish quiz"
+                      ? "Finish"
                       : "Next song"}
                   </button>
                 </div>
@@ -168,17 +149,19 @@ export function HostRoom() {
                 state.participants.length > 0 &&
                 state.status === "playing" && (
                   <p className="muted">
-                    Some players still guessing — extend the clip or reveal.
+                    Still guessing — unlock more of the track or reveal.
                   </p>
                 )}
-            </div>
+            </>
           )}
-
           {error && <p className="error">{error}</p>}
         </section>
 
-        <aside className="surface">
+        <aside className="host-score-panel">
           <h3>Scores</h3>
+          <p className="muted" style={{ margin: "0 0 0.75rem" }}>
+            {state?.participants.length ?? 0} joined
+          </p>
           <Scoreboard participants={state?.participants ?? []} />
         </aside>
       </div>
