@@ -76,7 +76,7 @@ export function useSessionStream(
       }
     };
     void refresh();
-    const poll = setInterval(refresh, hostToken ? 2000 : 3000);
+    const poll = setInterval(refresh, 1000);
 
     return () => {
       closed = true;
