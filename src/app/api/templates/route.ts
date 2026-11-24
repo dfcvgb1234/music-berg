@@ -7,7 +7,7 @@ import {
 } from "@/lib/audioValidate";
 import { sql } from "@/lib/db";
 import { newId } from "@/lib/ids";
-import { formatMbLabel, getRecording } from "@/lib/musicbrainz";
+import { formatTrackLabel, getTrack } from "@/lib/itunes";
 import { clientKey, rateLimit } from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
@@ -76,22 +76,22 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Template name is required" }, { status: 400 });
   }
 
-  const mbIds = form.getAll("musicbrainzIds").map((v) => String(v).trim());
+  const itunesIds = form.getAll("itunesTrackIds").map((v) => String(v).trim());
   const files = form.getAll("songFiles");
 
-  if (mbIds.length === 0 || files.length === 0) {
+  if (itunesIds.length === 0 || files.length === 0) {
     return NextResponse.json(
-      { error: "Add at least one MusicBrainz track + MP3" },
+      { error: "Add at least one iTunes track + MP3" },
       { status: 400 },
     );
   }
-  if (mbIds.length !== files.length) {
+  if (itunesIds.length !== files.length) {
     return NextResponse.json(
-      { error: "Each song needs a MusicBrainz pick and an MP3" },
+      { error: "Each song needs an iTunes pick and an MP3" },
       { status: 400 },
     );
   }
-  if (mbIds.length > uploadLimits.maxSongsPerTemplate) {
+  if (itunesIds.length > uploadLimits.maxSongsPerTemplate) {
     return NextResponse.json(
       {
         error: `At most ${uploadLimits.maxSongsPerTemplate} songs per template`,
@@ -103,26 +103,26 @@ export async function POST(request: Request) {
   type Validated = {
     displayName: string;
     artist: string;
-    musicbrainzId: string;
+    itunesTrackId: string;
     coverArtUrl: string | null;
     buf: Buffer;
   };
   const validated: Validated[] = [];
   let totalBytes = 0;
 
-  for (let i = 0; i < mbIds.length; i++) {
-    const mbId = mbIds[i];
+  for (let i = 0; i < itunesIds.length; i++) {
+    const itunesId = itunesIds[i];
     const file = files[i];
-    if (!mbId) {
+    if (!itunesId || !/^\d+$/.test(itunesId)) {
       return NextResponse.json(
-        { error: "Each song must be picked from MusicBrainz" },
+        { error: "Each song must be picked from iTunes" },
         { status: 400 },
       );
     }
-    const recording = await getRecording(mbId);
-    if (!recording) {
+    const track = await getTrack(itunesId);
+    if (!track) {
       return NextResponse.json(
-        { error: "Invalid MusicBrainz recording" },
+        { error: "Invalid iTunes track" },
         { status: 400 },
       );
     }
@@ -171,10 +171,10 @@ export async function POST(request: Request) {
       );
     }
     validated.push({
-      displayName: formatMbLabel(recording),
-      artist: recording.artist,
-      musicbrainzId: recording.id,
-      coverArtUrl: recording.coverArtUrl,
+      displayName: formatTrackLabel(track),
+      artist: track.artist,
+      itunesTrackId: track.id,
+      coverArtUrl: track.coverArtUrl,
       buf,
     });
   }
@@ -188,7 +188,7 @@ export async function POST(request: Request) {
   for (let i = 0; i < validated.length; i++) {
     const song = validated[i];
     await sql(
-      `insert into songs (id, template_id, display_name, mime_type, audio_data, sort_order, musicbrainz_id, cover_art_url, artist_credit)
+      `insert into songs (id, template_id, display_name, mime_type, audio_data, sort_order, itunes_track_id, cover_art_url, artist_credit)
        values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
       [
         newId(),
@@ -197,7 +197,7 @@ export async function POST(request: Request) {
         "audio/mpeg",
         song.buf,
         i,
-        song.musicbrainzId,
+        song.itunesTrackId,
         song.coverArtUrl,
         song.artist,
       ],

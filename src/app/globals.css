@@ -401,26 +401,26 @@ textarea {
   gap: 0.6rem;
 }
 
-.guess-form.guess-mb {
+.guess-form.guess-track {
   grid-template-columns: 1fr;
   align-items: start;
 }
 
-.mb-pick {
+.track-pick {
   position: relative;
   z-index: 1;
 }
 
-.mb-pick.is-open {
+.track-pick.is-open {
   z-index: 40;
 }
 
-.mb-combobox {
+.track-combobox {
   position: relative;
   z-index: 1;
 }
 
-.mb-results {
+.track-results {
   list-style: none;
   margin: 0.5rem 0 0;
   padding: 0;
@@ -437,7 +437,7 @@ textarea {
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
 }
 
-.mb-result {
+.track-result {
   display: flex;
   align-items: center;
   gap: 0.75rem;
@@ -451,28 +451,28 @@ textarea {
   cursor: pointer;
 }
 
-.mb-result:last-child {
+.track-result:last-child {
   border-bottom: 0;
 }
 
-.mb-result:hover,
-.mb-result:focus-visible {
+.track-result:hover,
+.track-result:focus-visible {
   background: rgba(120, 220, 180, 0.08);
   outline: none;
 }
 
-.mb-result-text {
+.track-result-text {
   display: flex;
   flex-direction: column;
   gap: 0.15rem;
   min-width: 0;
 }
 
-.mb-result-text strong {
+.track-result-text strong {
   font-weight: 600;
 }
 
-.mb-cover {
+.track-cover {
   width: 44px;
   height: 44px;
   object-fit: cover;
@@ -481,11 +481,11 @@ textarea {
   background: rgba(255, 255, 255, 0.06);
 }
 
-.mb-cover-empty {
+.track-cover-empty {
   border: 1px dashed var(--line);
 }
 
-.mb-selected {
+.track-selected {
   display: flex;
   align-items: center;
   gap: 0.75rem;
@@ -495,7 +495,7 @@ textarea {
   background: rgba(255, 255, 255, 0.03);
 }
 
-.mb-selected-meta {
+.track-selected-meta {
   display: flex;
   flex-direction: column;
   gap: 0.15rem;

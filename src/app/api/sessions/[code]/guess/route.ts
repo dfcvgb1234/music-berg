@@ -48,11 +48,11 @@ export async function POST(
   }
 
   const body = await request.json().catch(() => null);
-  const musicbrainzId = String(body?.musicbrainzId ?? "").trim();
+  const itunesTrackId = String(body?.itunesTrackId ?? "").trim();
   const guessLabel = String(body?.label ?? body?.guess ?? "").trim().slice(0, 120);
-  if (!musicbrainzId || !/^[0-9a-f-]{36}$/i.test(musicbrainzId)) {
+  if (!itunesTrackId || !/^\d+$/.test(itunesTrackId)) {
     return NextResponse.json(
-      { error: "Pick a MusicBrainz recording" },
+      { error: "Pick an iTunes track" },
       { status: 400 },
     );
   }
@@ -60,9 +60,9 @@ export async function POST(
   const songs = await sql<{
     id: string;
     display_name: string;
-    musicbrainz_id: string | null;
+    itunes_track_id: string | null;
   }>(
-    `select id, display_name, musicbrainz_id from songs where template_id = $1
+    `select id, display_name, itunes_track_id from songs where template_id = $1
      order by sort_order asc, created_at asc`,
     [session.template_id],
   );
@@ -70,9 +70,9 @@ export async function POST(
   if (!song) {
     return NextResponse.json({ error: "No current song" }, { status: 400 });
   }
-  if (!song.musicbrainz_id) {
+  if (!song.itunes_track_id) {
     return NextResponse.json(
-      { error: "This round has no MusicBrainz id" },
+      { error: "This round has no iTunes track id" },
       { status: 400 },
     );
   }
@@ -98,8 +98,7 @@ export async function POST(
     );
   }
 
-  const correct =
-    musicbrainzId.toLowerCase() === song.musicbrainz_id.toLowerCase();
+  const correct = itunesTrackId === song.itunes_track_id;
   const points = correct ? pointsForClip(session.clip_ms) : 0;
 
   await sql(
@@ -110,7 +109,7 @@ export async function POST(
       session.id,
       participant.id,
       session.current_song_index,
-      guessLabel || musicbrainzId,
+      guessLabel || itunesTrackId,
       correct,
     ],
   );

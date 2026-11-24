@@ -4,10 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
 import { ClipPlayer } from "@/components/ClipPlayer";
-import {
-  MusicBrainzPicker,
-  type PickedRecording,
-} from "@/components/MusicBrainzPicker";
+import { TrackPicker, type PickedTrack } from "@/components/TrackPicker";
 import { Scoreboard } from "@/components/Scoreboard";
 import { readApiJson } from "@/lib/readApiJson";
 import { useSessionStream } from "@/lib/useSessionStream";
@@ -22,7 +19,7 @@ export function PlayRoom() {
   const params = useParams<{ code: string }>();
   const code = String(params.code ?? "").toUpperCase();
   const [player, setPlayer] = useState<StoredPlayer | null>(null);
-  const [pick, setPick] = useState<PickedRecording | null>(null);
+  const [pick, setPick] = useState<PickedTrack | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -41,7 +38,6 @@ export function PlayRoom() {
     enabled: Boolean(player),
   });
 
-  // Clear round feedback when the host advances songs.
   useEffect(() => {
     setFeedback(null);
     setError(null);
@@ -62,7 +58,7 @@ export function PlayRoom() {
           "x-participant-token": player.token,
         },
         body: JSON.stringify({
-          musicbrainzId: pick.musicbrainzId,
+          itunesTrackId: pick.itunesTrackId,
           label: pick.label,
         }),
       });
@@ -177,13 +173,13 @@ export function PlayRoom() {
             )}
 
             {canGuess ? (
-              <form className="guess-form guess-mb" onSubmit={onGuess}>
-                <MusicBrainzPicker
-                  id="guess-mb"
+              <form className="guess-form guess-track" onSubmit={onGuess}>
+                <TrackPicker
+                  id="guess-itunes"
                   label="Your guess"
                   value={pick}
                   onChange={setPick}
-                  placeholder="Search MusicBrainz…"
+                  placeholder="Search iTunes…"
                 />
                 <button
                   className="btn"

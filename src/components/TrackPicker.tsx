@@ -1,32 +1,32 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { MbRecordingHit } from "@/lib/musicbrainz";
+import type { ItunesTrackHit } from "@/lib/itunes";
 import { readApiJson } from "@/lib/readApiJson";
 
-export type PickedRecording = {
-  musicbrainzId: string;
+export type PickedTrack = {
+  itunesTrackId: string;
   title: string;
   artist: string;
   coverArtUrl: string | null;
   label: string;
 };
 
-export function MusicBrainzPicker({
+export function TrackPicker({
   id,
   label,
   value,
   onChange,
-  placeholder = "Search MusicBrainz…",
+  placeholder = "Search iTunes…",
 }: {
   id: string;
   label: string;
-  value: PickedRecording | null;
-  onChange: (pick: PickedRecording | null) => void;
+  value: PickedTrack | null;
+  onChange: (pick: PickedTrack | null) => void;
   placeholder?: string;
 }) {
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<MbRecordingHit[]>([]);
+  const [results, setResults] = useState<ItunesTrackHit[]>([]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -53,11 +53,11 @@ export function MusicBrainzPicker({
         setError(null);
         try {
           const res = await fetch(
-            `/api/musicbrainz/search?q=${encodeURIComponent(q)}`,
+            `/api/itunes/search?q=${encodeURIComponent(q)}`,
             { cache: "no-store" },
           );
           const data = await readApiJson<{
-            results?: MbRecordingHit[];
+            results?: ItunesTrackHit[];
             error?: string;
           }>(res);
           if (!res.ok) throw new Error(data.error || "Search failed");
@@ -70,7 +70,7 @@ export function MusicBrainzPicker({
           setLoading(false);
         }
       })();
-    }, 400);
+    }, 350);
     return () => clearTimeout(handle);
   }, [query, value]);
 
@@ -78,24 +78,25 @@ export function MusicBrainzPicker({
 
   if (value) {
     return (
-      <div className="field mb-pick">
+      <div className="field track-pick">
         <label htmlFor={id}>{label}</label>
-        <div className="mb-selected">
+        <div className="track-selected">
           {value.coverArtUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={value.coverArtUrl}
               alt=""
-              className="mb-cover"
+              className="track-cover"
               loading="lazy"
+              referrerPolicy="no-referrer"
               onError={(e) => {
                 (e.target as HTMLImageElement).style.display = "none";
               }}
             />
           ) : (
-            <div className="mb-cover mb-cover-empty" aria-hidden />
+            <div className="track-cover track-cover-empty" aria-hidden />
           )}
-          <div className="mb-selected-meta">
+          <div className="track-selected-meta">
             <strong>{value.title}</strong>
             <span className="muted">{value.artist}</span>
           </div>
@@ -117,11 +118,11 @@ export function MusicBrainzPicker({
 
   return (
     <div
-      className={`field mb-pick${showResults ? " is-open" : ""}`}
+      className={`field track-pick${showResults ? " is-open" : ""}`}
       ref={boxRef}
     >
       <label htmlFor={id}>{label}</label>
-      <div className="mb-combobox">
+      <div className="track-combobox">
         <input
           id={id}
           value={query}
@@ -132,17 +133,17 @@ export function MusicBrainzPicker({
           required
         />
         {showResults && (
-          <ul className="mb-results" role="listbox">
+          <ul className="track-results" role="listbox">
             {results.map((hit) => {
               const labelText = `${hit.artist} — ${hit.title}`;
               return (
                 <li key={hit.id}>
                   <button
                     type="button"
-                    className="mb-result"
+                    className="track-result"
                     onClick={() => {
                       onChange({
-                        musicbrainzId: hit.id,
+                        itunesTrackId: hit.id,
                         title: hit.title,
                         artist: hit.artist,
                         coverArtUrl: hit.coverArtUrl,
@@ -158,17 +159,18 @@ export function MusicBrainzPicker({
                       <img
                         src={hit.coverArtUrl}
                         alt=""
-                        className="mb-cover"
+                        className="track-cover"
                         loading="lazy"
+                        referrerPolicy="no-referrer"
                         onError={(e) => {
                           (e.target as HTMLImageElement).style.visibility =
                             "hidden";
                         }}
                       />
                     ) : (
-                      <div className="mb-cover mb-cover-empty" aria-hidden />
+                      <div className="track-cover track-cover-empty" aria-hidden />
                     )}
-                    <span className="mb-result-text">
+                    <span className="track-result-text">
                       <strong>{hit.title}</strong>
                       <span className="muted">{hit.artist}</span>
                     </span>
@@ -179,10 +181,10 @@ export function MusicBrainzPicker({
           </ul>
         )}
       </div>
-      {loading && <p className="muted">Searching MusicBrainz…</p>}
+      {loading && <p className="muted">Searching iTunes…</p>}
       {error && <p className="error">{error}</p>}
       <p className="muted" style={{ margin: 0 }}>
-        Pick a MusicBrainz recording — free text is not allowed.
+        Pick an iTunes track — free text is not allowed.
       </p>
     </div>
   );

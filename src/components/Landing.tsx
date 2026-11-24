@@ -2,10 +2,7 @@
 
 import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
-import {
-  MusicBrainzPicker,
-  type PickedRecording,
-} from "@/components/MusicBrainzPicker";
+import { TrackPicker, type PickedTrack } from "@/components/TrackPicker";
 import { readApiJson } from "@/lib/readApiJson";
 import { formatBytes, uploadLimits } from "@/lib/uploadLimits";
 
@@ -17,7 +14,7 @@ type Template = {
 
 type SongDraft = {
   key: string;
-  pick: PickedRecording | null;
+  pick: PickedTrack | null;
   file: File | null;
 };
 
@@ -66,9 +63,7 @@ export function Landing() {
       let total = 0;
       for (const song of songs) {
         if (!song.pick || !song.file) {
-          throw new Error(
-            "Each song needs a MusicBrainz pick and an MP3",
-          );
+          throw new Error("Each song needs an iTunes pick and an MP3");
         }
         if (song.file.size > uploadLimits.maxFileBytes) {
           throw new Error(
@@ -91,7 +86,7 @@ export function Landing() {
       const form = new FormData();
       form.set("name", templateName.trim());
       for (const song of songs) {
-        form.append("musicbrainzIds", song.pick!.musicbrainzId);
+        form.append("itunesTrackIds", song.pick!.itunesTrackId);
         form.append("songFiles", song.file!);
       }
       const res = await fetch("/api/templates", {
@@ -134,7 +129,7 @@ export function Landing() {
       <section className="panel" id="templates">
         <h2>Create a quiz template</h2>
         <p className="lead">
-          Search MusicBrainz for each track (required), upload short MP3s (max{" "}
+          Search iTunes for each track (required), upload short MP3s (max{" "}
           {formatBytes(uploadLimits.maxFileBytes)} each,{" "}
           {formatBytes(uploadLimits.maxRequestBytes)} total), then host anytime.
         </p>
@@ -170,9 +165,9 @@ export function Landing() {
           <div className="song-rows">
             {songs.map((song, index) => (
               <div className="song-row" key={song.key}>
-                <MusicBrainzPicker
-                  id={`mb-${song.key}`}
-                  label={`Song ${index + 1} (MusicBrainz)`}
+                <TrackPicker
+                  id={`itunes-${song.key}`}
+                  label={`Song ${index + 1} (iTunes)`}
                   value={song.pick}
                   onChange={(pick) => {
                     const next = [...songs];
@@ -226,9 +221,7 @@ export function Landing() {
             <button
               className="btn"
               type="submit"
-              disabled={
-                busy || songs.some((s) => !s.pick || !s.file)
-              }
+              disabled={busy || songs.some((s) => !s.pick || !s.file)}
             >
               {busy ? "Saving…" : "Save template"}
             </button>
