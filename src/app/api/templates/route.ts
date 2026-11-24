@@ -7,6 +7,7 @@ import {
 } from "@/lib/audioValidate";
 import { sql } from "@/lib/db";
 import { newId } from "@/lib/ids";
+import { formatMbLabel, getRecording } from "@/lib/musicbrainz";
 import { clientKey, rateLimit } from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
@@ -75,21 +76,22 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Template name is required" }, { status: 400 });
   }
 
-  const songNames = form
-    .getAll("songNames")
-    .map((v) => String(v).trim().slice(0, 80));
+  const mbIds = form.getAll("musicbrainzIds").map((v) => String(v).trim());
   const files = form.getAll("songFiles");
 
-  if (songNames.length === 0 || files.length === 0) {
-    return NextResponse.json({ error: "Add at least one song" }, { status: 400 });
-  }
-  if (songNames.length !== files.length) {
+  if (mbIds.length === 0 || files.length === 0) {
     return NextResponse.json(
-      { error: "Each song needs a name and MP3" },
+      { error: "Add at least one MusicBrainz track + MP3" },
       { status: 400 },
     );
   }
-  if (songNames.length > uploadLimits.maxSongsPerTemplate) {
+  if (mbIds.length !== files.length) {
+    return NextResponse.json(
+      { error: "Each song needs a MusicBrainz pick and an MP3" },
+      { status: 400 },
+    );
+  }
+  if (mbIds.length > uploadLimits.maxSongsPerTemplate) {
     return NextResponse.json(
       {
         error: `At most ${uploadLimits.maxSongsPerTemplate} songs per template`,
@@ -98,14 +100,31 @@ export async function POST(request: Request) {
     );
   }
 
-  const validated: { displayName: string; buf: Buffer }[] = [];
+  type Validated = {
+    displayName: string;
+    artist: string;
+    musicbrainzId: string;
+    coverArtUrl: string | null;
+    buf: Buffer;
+  };
+  const validated: Validated[] = [];
   let totalBytes = 0;
 
-  for (let i = 0; i < songNames.length; i++) {
-    const displayName = songNames[i];
+  for (let i = 0; i < mbIds.length; i++) {
+    const mbId = mbIds[i];
     const file = files[i];
-    if (!displayName) {
-      return NextResponse.json({ error: "Song name required" }, { status: 400 });
+    if (!mbId) {
+      return NextResponse.json(
+        { error: "Each song must be picked from MusicBrainz" },
+        { status: 400 },
+      );
+    }
+    const recording = await getRecording(mbId);
+    if (!recording) {
+      return NextResponse.json(
+        { error: "Invalid MusicBrainz recording" },
+        { status: 400 },
+      );
     }
     if (!(file instanceof File)) {
       return NextResponse.json({ error: "Invalid audio file" }, { status: 400 });
@@ -151,7 +170,13 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
-    validated.push({ displayName, buf });
+    validated.push({
+      displayName: formatMbLabel(recording),
+      artist: recording.artist,
+      musicbrainzId: recording.id,
+      coverArtUrl: recording.coverArtUrl,
+      buf,
+    });
   }
 
   const templateId = newId();
@@ -163,9 +188,19 @@ export async function POST(request: Request) {
   for (let i = 0; i < validated.length; i++) {
     const song = validated[i];
     await sql(
-      `insert into songs (id, template_id, display_name, mime_type, audio_data, sort_order)
-       values ($1, $2, $3, $4, $5, $6)`,
-      [newId(), templateId, song.displayName, "audio/mpeg", song.buf, i],
+      `insert into songs (id, template_id, display_name, mime_type, audio_data, sort_order, musicbrainz_id, cover_art_url, artist_credit)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [
+        newId(),
+        templateId,
+        song.displayName,
+        "audio/mpeg",
+        song.buf,
+        i,
+        song.musicbrainzId,
+        song.coverArtUrl,
+        song.artist,
+      ],
     );
   }
 

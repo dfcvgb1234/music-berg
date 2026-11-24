@@ -2,6 +2,10 @@
 
 import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
+import {
+  MusicBrainzPicker,
+  type PickedRecording,
+} from "@/components/MusicBrainzPicker";
 import { readApiJson } from "@/lib/readApiJson";
 import { formatBytes, uploadLimits } from "@/lib/uploadLimits";
 
@@ -11,7 +15,11 @@ type Template = {
   songCount: number;
 };
 
-type SongDraft = { key: string; name: string; file: File | null };
+type SongDraft = {
+  key: string;
+  pick: PickedRecording | null;
+  file: File | null;
+};
 
 function isLocalHost(): boolean {
   if (typeof window === "undefined") return true;
@@ -24,7 +32,7 @@ export function Landing() {
   const [templateName, setTemplateName] = useState("");
   const [uploadSecret, setUploadSecret] = useState("");
   const [songs, setSongs] = useState<SongDraft[]>([
-    { key: "1", name: "", file: null },
+    { key: "1", pick: null, file: null },
   ]);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -57,8 +65,10 @@ export function Landing() {
     try {
       let total = 0;
       for (const song of songs) {
-        if (!song.name.trim() || !song.file) {
-          throw new Error("Each song needs a display name and an MP3");
+        if (!song.pick || !song.file) {
+          throw new Error(
+            "Each song needs a MusicBrainz pick and an MP3",
+          );
         }
         if (song.file.size > uploadLimits.maxFileBytes) {
           throw new Error(
@@ -81,7 +91,7 @@ export function Landing() {
       const form = new FormData();
       form.set("name", templateName.trim());
       for (const song of songs) {
-        form.append("songNames", song.name.trim());
+        form.append("musicbrainzIds", song.pick!.musicbrainzId);
         form.append("songFiles", song.file!);
       }
       const res = await fetch("/api/templates", {
@@ -93,7 +103,7 @@ export function Landing() {
       if (!res.ok) throw new Error(data.error || "Could not save template");
       setStatus(`Saved template “${data.name}”`);
       setTemplateName("");
-      setSongs([{ key: String(Date.now()), name: "", file: null }]);
+      setSongs([{ key: String(Date.now()), pick: null, file: null }]);
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
@@ -124,10 +134,9 @@ export function Landing() {
       <section className="panel" id="templates">
         <h2>Create a quiz template</h2>
         <p className="lead">
-          Name the pack, upload short MP3s (max{" "}
+          Search MusicBrainz for each track (required), upload short MP3s (max{" "}
           {formatBytes(uploadLimits.maxFileBytes)} each,{" "}
-          {formatBytes(uploadLimits.maxRequestBytes)} total), and you&apos;re
-          ready to host anytime.
+          {formatBytes(uploadLimits.maxRequestBytes)} total), then host anytime.
         </p>
 
         <form className="stack" onSubmit={onCreate}>
@@ -161,22 +170,17 @@ export function Landing() {
           <div className="song-rows">
             {songs.map((song, index) => (
               <div className="song-row" key={song.key}>
-                <div className="field">
-                  <label htmlFor={`song-name-${song.key}`}>
-                    Song {index + 1} display name
-                  </label>
-                  <input
-                    id={`song-name-${song.key}`}
-                    value={song.name}
-                    onChange={(e) => {
-                      const next = [...songs];
-                      next[index] = { ...song, name: e.target.value };
-                      setSongs(next);
-                    }}
-                    placeholder="Artist — Title"
-                    required
-                  />
-                </div>
+                <MusicBrainzPicker
+                  id={`mb-${song.key}`}
+                  label={`Song ${index + 1} (MusicBrainz)`}
+                  value={song.pick}
+                  onChange={(pick) => {
+                    const next = [...songs];
+                    next[index] = { ...song, pick };
+                    setSongs(next);
+                  }}
+                  placeholder="Search title or artist…"
+                />
                 <div className="field">
                   <label htmlFor={`song-file-${song.key}`}>MP3 file</label>
                   <input
@@ -213,13 +217,19 @@ export function Landing() {
               onClick={() =>
                 setSongs([
                   ...songs,
-                  { key: String(Date.now()), name: "", file: null },
+                  { key: String(Date.now()), pick: null, file: null },
                 ])
               }
             >
               Add song
             </button>
-            <button className="btn" type="submit" disabled={busy}>
+            <button
+              className="btn"
+              type="submit"
+              disabled={
+                busy || songs.some((s) => !s.pick || !s.file)
+              }
+            >
               {busy ? "Saving…" : "Save template"}
             </button>
           </div>

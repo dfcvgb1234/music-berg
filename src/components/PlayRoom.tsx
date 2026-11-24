@@ -4,6 +4,10 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
 import { ClipPlayer } from "@/components/ClipPlayer";
+import {
+  MusicBrainzPicker,
+  type PickedRecording,
+} from "@/components/MusicBrainzPicker";
 import { Scoreboard } from "@/components/Scoreboard";
 import { readApiJson } from "@/lib/readApiJson";
 import { useSessionStream } from "@/lib/useSessionStream";
@@ -18,7 +22,7 @@ export function PlayRoom() {
   const params = useParams<{ code: string }>();
   const code = String(params.code ?? "").toUpperCase();
   const [player, setPlayer] = useState<StoredPlayer | null>(null);
-  const [guess, setGuess] = useState("");
+  const [pick, setPick] = useState<PickedRecording | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -41,12 +45,12 @@ export function PlayRoom() {
   useEffect(() => {
     setFeedback(null);
     setError(null);
-    setGuess("");
+    setPick(null);
   }, [state?.currentSongIndex]);
 
   const onGuess = async (e: FormEvent) => {
     e.preventDefault();
-    if (!player) return;
+    if (!player || !pick) return;
     setBusy(true);
     setError(null);
     setFeedback(null);
@@ -57,7 +61,10 @@ export function PlayRoom() {
           "Content-Type": "application/json",
           "x-participant-token": player.token,
         },
-        body: JSON.stringify({ guess }),
+        body: JSON.stringify({
+          musicbrainzId: pick.musicbrainzId,
+          label: pick.label,
+        }),
       });
       const data = await readApiJson<{
         error?: string;
@@ -78,12 +85,12 @@ export function PlayRoom() {
             ? "Already locked in."
             : `Correct! +${data.points ?? 0} pts`,
         );
-        setGuess("");
+        setPick(null);
       } else {
         setFeedback(
           data.message || "Wrong — you're locked out for this round",
         );
-        setGuess("");
+        setPick(null);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed");
@@ -170,20 +177,20 @@ export function PlayRoom() {
             )}
 
             {canGuess ? (
-              <form className="guess-form" onSubmit={onGuess}>
-                <input
-                  value={guess}
-                  onChange={(e) => setGuess(e.target.value)}
-                  placeholder="Song name"
-                  aria-label="Guess the song"
-                  autoComplete="off"
+              <form className="guess-form guess-mb" onSubmit={onGuess}>
+                <MusicBrainzPicker
+                  id="guess-mb"
+                  label="Your guess"
+                  value={pick}
+                  onChange={setPick}
+                  placeholder="Search MusicBrainz…"
                 />
                 <button
                   className="btn"
                   type="submit"
-                  disabled={busy || !guess.trim()}
+                  disabled={busy || !pick}
                 >
-                  Guess
+                  Lock guess
                 </button>
               </form>
             ) : me?.guessedCorrect ? (
