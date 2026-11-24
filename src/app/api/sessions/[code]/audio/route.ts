@@ -7,8 +7,8 @@ import { clientKey, rateLimit } from "@/lib/rateLimit";
 export const runtime = "nodejs";
 
 /**
- * Session-gated clip audio. Requires host or participant token.
- * Loads only the current song blob. Full track only after reveal.
+ * Host-only session audio. Participants never receive clips or full tracks —
+ * music plays only on the host device.
  */
 export async function GET(
   request: Request,
@@ -29,20 +29,11 @@ export async function GET(
   }
 
   const hostToken = request.headers.get("x-host-token") ?? "";
-  const participantToken = request.headers.get("x-participant-token") ?? "";
-  const isHost = Boolean(hostToken && hostToken === session.host_token);
-
-  if (!isHost) {
-    if (!participantToken) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-    const members = await sql<{ id: string }>(
-      `select id from participants where session_id = $1 and token = $2`,
-      [session.id, participantToken],
+  if (!hostToken || hostToken !== session.host_token) {
+    return NextResponse.json(
+      { error: "Audio is host-only" },
+      { status: 403 },
     );
-    if (!members[0]) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
   }
 
   if (session.status !== "playing" && session.status !== "revealed") {

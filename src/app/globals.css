@@ -515,6 +515,50 @@ textarea {
   min-width: 0;
 }
 
+.track-answers {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.track-extra-answers {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.track-extra-chip {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.4rem 0.55rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  font-size: 0.9rem;
+}
+
+.track-extra-chip span {
+  flex: 1;
+  min-width: 0;
+}
+
+.track-cover-sm {
+  width: 32px;
+  height: 32px;
+}
+
+.song-row-multi {
+  align-items: start;
+}
+
+@media (min-width: 720px) {
+  .song-row-multi {
+    grid-template-columns: 1.6fr 0.9fr auto;
+  }
+}
+
 .badge {
   display: inline-block;
   width: fit-content;

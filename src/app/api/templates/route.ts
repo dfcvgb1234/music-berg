@@ -7,7 +7,7 @@ import {
 } from "@/lib/audioValidate";
 import { sql } from "@/lib/db";
 import { newId } from "@/lib/ids";
-import { formatTrackLabel, getTrack } from "@/lib/itunes";
+import { formatTrackLabel, getTrack, getTracks, trackFingerprint } from "@/lib/itunes";
 import { clientKey, rateLimit } from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
@@ -19,7 +19,7 @@ type TemplateRow = {
   song_count: string;
 };
 
-/** Public list: template id/name/count only — never song titles or IDs (answers). */
+/** Public list: track-list id/name/count only — never song titles or IDs (answers). */
 export async function GET() {
   const templates = await sql<TemplateRow>(
     `select t.id, t.name, t.created_at,
@@ -36,6 +36,22 @@ export async function GET() {
       songCount: Number(t.song_count),
     })),
   });
+}
+
+function parseAnswerIds(raw: unknown, primaryId: string): string[] {
+  let ids: string[] = [];
+  if (typeof raw === "string" && raw.trim()) {
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (Array.isArray(parsed)) {
+        ids = parsed.map((v) => String(v).trim()).filter((v) => /^\d+$/.test(v));
+      }
+    } catch {
+      ids = [];
+    }
+  }
+  if (!ids.includes(primaryId)) ids.unshift(primaryId);
+  return [...new Set(ids)].slice(0, 20);
 }
 
 export async function POST(request: Request) {
@@ -80,6 +96,7 @@ export async function POST(request: Request) {
   }
 
   const itunesIds = form.getAll("itunesTrackIds").map((v) => String(v).trim());
+  const answerIdBlobs = form.getAll("itunesAnswerIds");
   const files = form.getAll("songFiles");
 
   if (itunesIds.length === 0 || files.length === 0) {
@@ -107,6 +124,9 @@ export async function POST(request: Request) {
     displayName: string;
     artist: string;
     itunesTrackId: string;
+    answerIds: string[];
+    /** JSON array of normalized artist|title fingerprints. */
+    fingerprints: string[];
     coverArtUrl: string | null;
     buf: Buffer;
   };
@@ -122,13 +142,30 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
-    const track = await getTrack(itunesId);
-    if (!track) {
+    const answerIds = parseAnswerIds(answerIdBlobs[i], itunesId);
+    const lookedUp = await getTracks(answerIds);
+    const primary = lookedUp.get(itunesId) ?? (await getTrack(itunesId));
+    if (!primary) {
       return NextResponse.json(
         { error: "Invalid track selection" },
         { status: 400 },
       );
     }
+    // Keep only ids that resolve; always include primary.
+    const confirmed = answerIds.filter(
+      (id) => id === itunesId || lookedUp.has(id),
+    );
+    if (!confirmed.includes(itunesId)) confirmed.unshift(itunesId);
+
+    // Fingerprints for every allowed answer so remasters of extras also match.
+    const fingerprints = new Set<string>([
+      trackFingerprint(primary.artist, primary.title),
+    ]);
+    for (const id of confirmed) {
+      const hit = lookedUp.get(id);
+      if (hit) fingerprints.add(trackFingerprint(hit.artist, hit.title));
+    }
+
     if (!(file instanceof File)) {
       return NextResponse.json({ error: "Invalid audio file" }, { status: 400 });
     }
@@ -174,10 +211,12 @@ export async function POST(request: Request) {
       );
     }
     validated.push({
-      displayName: formatTrackLabel(track),
-      artist: track.artist,
-      itunesTrackId: track.id,
-      coverArtUrl: track.coverArtUrl,
+      displayName: formatTrackLabel(primary),
+      artist: primary.artist,
+      itunesTrackId: primary.id,
+      answerIds: confirmed,
+      fingerprints: [...fingerprints],
+      coverArtUrl: primary.coverArtUrl,
       buf,
     });
   }
@@ -191,8 +230,8 @@ export async function POST(request: Request) {
   for (let i = 0; i < validated.length; i++) {
     const song = validated[i];
     await sql(
-      `insert into songs (id, template_id, display_name, mime_type, audio_data, sort_order, itunes_track_id, cover_art_url, artist_credit)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      `insert into songs (id, template_id, display_name, mime_type, audio_data, sort_order, itunes_track_id, cover_art_url, artist_credit, itunes_answer_ids, answer_fingerprint)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
       [
         newId(),
         templateId,
@@ -203,6 +242,8 @@ export async function POST(request: Request) {
         song.itunesTrackId,
         song.coverArtUrl,
         song.artist,
+        JSON.stringify(song.answerIds),
+        JSON.stringify(song.fingerprints),
       ],
     );
   }

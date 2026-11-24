@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { sql } from "@/lib/db";
 import { newId } from "@/lib/ids";
+import { getTrack, trackFingerprint } from "@/lib/itunes";
 import { pointsForClip } from "@/lib/normalize";
 import {
   broadcastSession,
@@ -67,8 +68,11 @@ export async function POST(
     id: string;
     display_name: string;
     itunes_track_id: string | null;
+    itunes_answer_ids: string | null;
+    answer_fingerprint: string | null;
   }>(
-    `select id, display_name, itunes_track_id from songs where template_id = $1
+    `select id, display_name, itunes_track_id, itunes_answer_ids, answer_fingerprint
+     from songs where template_id = $1
      order by sort_order asc, created_at asc`,
     [session.template_id],
   );
@@ -83,7 +87,48 @@ export async function POST(
     );
   }
 
-  const correct = itunesTrackId === song.itunes_track_id;
+  let answerIds: string[] = [song.itunes_track_id];
+  if (song.itunes_answer_ids) {
+    try {
+      const parsed = JSON.parse(song.itunes_answer_ids) as unknown;
+      if (Array.isArray(parsed)) {
+        answerIds = [
+          ...new Set(
+            parsed
+              .map((v) => String(v).trim())
+              .filter((v) => /^\d+$/.test(v))
+              .concat(song.itunes_track_id),
+          ),
+        ];
+      }
+    } catch {
+      // keep primary only
+    }
+  }
+
+  let correct = answerIds.includes(itunesTrackId);
+  // Equivalent remaster / soundtrack cut: same normalized artist+title
+  // as any allowed answer (primary or explicitly multi-selected).
+  if (!correct && song.answer_fingerprint) {
+    const guessed = await getTrack(itunesTrackId);
+    if (guessed) {
+      const fp = trackFingerprint(guessed.artist, guessed.title);
+      let allowedFingerprints: string[] = [];
+      try {
+        const parsed = JSON.parse(song.answer_fingerprint) as unknown;
+        if (Array.isArray(parsed)) {
+          allowedFingerprints = parsed.map((v) => String(v));
+        } else if (typeof parsed === "string") {
+          allowedFingerprints = [parsed];
+        }
+      } catch {
+        // Legacy single fingerprint string (not JSON).
+        allowedFingerprints = [song.answer_fingerprint];
+      }
+      if (allowedFingerprints.includes(fp)) correct = true;
+    }
+  }
+
   const points = correct ? pointsForClip(session.clip_ms) : 0;
   const guessId = newId();
 

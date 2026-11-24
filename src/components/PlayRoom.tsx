@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
-import { ClipPlayer } from "@/components/ClipPlayer";
 import { TrackPicker, type PickedTrack } from "@/components/TrackPicker";
 import { Scoreboard } from "@/components/Scoreboard";
 import { readApiJson } from "@/lib/readApiJson";
@@ -59,6 +58,7 @@ export function PlayRoom() {
         },
         body: JSON.stringify({
           itunesTrackId: pick.itunesTrackId,
+          answerIds: pick.answerIds,
           label: pick.label,
         }),
       });
@@ -144,7 +144,7 @@ export function PlayRoom() {
                 Song {Math.min(state.currentSongIndex + 1, state.songCount)} /{" "}
                 {state.songCount}
                 {state.status === "playing"
-                  ? ` · hearing ${(state.clipMs / 1000).toFixed(
+                  ? ` · host unlocked ${(state.clipMs / 1000).toFixed(
                       state.clipMs % 1000 === 0 ? 0 : 1,
                     )}s`
                   : ""}
@@ -154,22 +154,16 @@ export function PlayRoom() {
 
           <div className="surface stack">
             {state?.status === "playing" && (
-              <div className="wave" aria-hidden>
-                <i /><i /><i /><i /><i />
-              </div>
+              <>
+                <div className="wave" aria-hidden>
+                  <i /><i /><i /><i /><i />
+                </div>
+                <p className="muted" style={{ margin: 0 }}>
+                  Listen on the host speakers — audio never plays on your
+                  device.
+                </p>
+              </>
             )}
-
-            <ClipPlayer
-              code={code}
-              songId={state?.currentSongId ?? null}
-              clipMs={state?.clipMs ?? 1000}
-              playToken={state?.playToken ?? 0}
-              active={
-                state?.status === "playing" || state?.status === "revealed"
-              }
-              fullTrack={state?.status === "revealed"}
-              participantToken={player.token}
-            />
 
             {state?.currentSongName && (
               <div className="reveal-card">

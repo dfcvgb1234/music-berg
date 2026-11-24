@@ -20,7 +20,7 @@ export async function GET(request: Request) {
   }
 
   try {
-    const results = await searchSongs(q, 20, "DK");
+    const results = await searchSongs(q, 12, "DK");
     return NextResponse.json({ results });
   } catch (err) {
     return NextResponse.json(

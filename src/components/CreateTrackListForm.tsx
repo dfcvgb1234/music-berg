@@ -8,8 +8,19 @@ import { formatBytes, uploadLimits } from "@/lib/uploadLimits";
 type SongDraft = {
   key: string;
   pick: PickedTrack | null;
+  extraAnswers: PickedTrack[];
   file: File | null;
 };
+
+function allAnswerIds(pick: PickedTrack, extras: PickedTrack[]): string[] {
+  return [
+    ...new Set([
+      pick.itunesTrackId,
+      ...pick.answerIds,
+      ...extras.flatMap((e) => [e.itunesTrackId, ...e.answerIds]),
+    ]),
+  ];
+}
 
 export function CreateTrackListForm({
   onCreated,
@@ -21,7 +32,7 @@ export function CreateTrackListForm({
   const [name, setName] = useState("");
   const [uploadSecret, setUploadSecret] = useState("");
   const [songs, setSongs] = useState<SongDraft[]>([
-    { key: "1", pick: null, file: null },
+    { key: "1", pick: null, extraAnswers: [], file: null },
   ]);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -59,7 +70,12 @@ export function CreateTrackListForm({
       const form = new FormData();
       form.set("name", name.trim());
       for (const song of songs) {
-        form.append("itunesTrackIds", song.pick!.itunesTrackId);
+        const pick = song.pick!;
+        form.append("itunesTrackIds", pick.itunesTrackId);
+        form.append(
+          "itunesAnswerIds",
+          JSON.stringify(allAnswerIds(pick, song.extraAnswers)),
+        );
         form.append("songFiles", song.file!);
       }
       const headers: HeadersInit = {};
@@ -79,7 +95,9 @@ export function CreateTrackListForm({
       if (!res.ok) throw new Error(data.error || "Could not save track list");
       setStatus(`Saved track list “${data.name}”`);
       setName("");
-      setSongs([{ key: String(Date.now()), pick: null, file: null }]);
+      setSongs([
+        { key: String(Date.now()), pick: null, extraAnswers: [], file: null },
+      ]);
       if (data.id && data.name) {
         onCreated?.({
           id: data.id,
@@ -107,7 +125,7 @@ export function CreateTrackListForm({
         />
       </div>
       <div className="field">
-            <label htmlFor="upload-secret">Upload secret</label>
+        <label htmlFor="upload-secret">Upload secret</label>
         <input
           id="upload-secret"
           type="password"
@@ -123,21 +141,29 @@ export function CreateTrackListForm({
       </div>
 
       <p className="muted" style={{ margin: 0 }}>
-        Search and pick each track, then upload a short MP3 (max{" "}
+        Search and pick each track (similar remasters are grouped). Optionally
+        add more accepted answers, then upload a short MP3 (max{" "}
         {formatBytes(uploadLimits.maxFileBytes)} each,{" "}
         {formatBytes(uploadLimits.maxRequestBytes)} total).
       </p>
 
       <div className="song-rows">
         {songs.map((song, index) => (
-          <div className="song-row" key={song.key}>
+          <div className="song-row song-row-multi" key={song.key}>
             <TrackPicker
               id={`track-${song.key}`}
               label={`Song ${index + 1}`}
               value={song.pick}
+              answers={song.extraAnswers}
+              multi
               onChange={(pick) => {
                 const next = [...songs];
-                next[index] = { ...song, pick };
+                next[index] = { ...song, pick, extraAnswers: [] };
+                setSongs(next);
+              }}
+              onAnswersChange={(extraAnswers) => {
+                const next = [...songs];
+                next[index] = { ...song, extraAnswers };
                 setSongs(next);
               }}
               placeholder="Search title or artist…"
@@ -176,7 +202,12 @@ export function CreateTrackListForm({
           onClick={() =>
             setSongs([
               ...songs,
-              { key: String(Date.now()), pick: null, file: null },
+              {
+                key: String(Date.now()),
+                pick: null,
+                extraAnswers: [],
+                file: null,
+              },
             ])
           }
         >
