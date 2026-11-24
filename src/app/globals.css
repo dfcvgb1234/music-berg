@@ -517,11 +517,16 @@ textarea {
 
 .badge {
   display: inline-block;
+  width: fit-content;
   padding: 0.25rem 0.6rem;
   border-radius: 999px;
   border: 1px solid var(--line);
   color: var(--steel);
   font-size: 0.8rem;
+}
+
+.host-setup {
+  max-width: 900px;
 }
 
 .wave {

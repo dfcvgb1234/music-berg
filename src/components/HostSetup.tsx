@@ -72,7 +72,7 @@ export function HostSetup() {
         </Link>
       </div>
 
-      <section className="stack" style={{ maxWidth: creating ? 900 : 560 }}>
+      <section className="stack host-setup">
         <h1 className="brand brand-md">Start a new quiz</h1>
         <p className="muted">
           Pick a track list. You&apos;ll get a 6-digit code for the room.
