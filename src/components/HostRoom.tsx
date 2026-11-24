@@ -32,25 +32,8 @@ export function HostRoom() {
     enabled: Boolean(hostToken),
   });
 
-  const action = async (path: string) => {
-    if (!hostToken) return;
-    // Unlock AudioContext inside the click stack so Play can autoplay after fetch.
-    vizRef.current?.primeAudio();
-    setBusy(true);
-    setError(null);
-    try {
-      const res = await fetch(`/api/sessions/${code}/${path}`, {
-        method: "POST",
-        headers: { "x-host-token": hostToken },
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Action failed");
-      if (data.state) setState(data.state);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed");
-    } finally {
-      setBusy(false);
-    }
+  const run = (path: "play" | "extend" | "reveal" | "next") => {
+    void vizRef.current?.runFromGesture(path);
   };
 
   if (!hostToken) {
@@ -95,9 +78,7 @@ export function HostRoom() {
                 {Math.min(state.currentSongIndex + 1, state.songCount)} /{" "}
                 {state.songCount}
                 {state.status === "finished" ? " · finished" : ""}
-                {pointsNow != null
-                  ? ` · ${pointsNow} pts if correct`
-                  : ""}
+                {pointsNow != null ? ` · ${pointsNow} pts if correct` : ""}
               </p>
 
               {state.revealAnswer && state.currentSongName && (
@@ -119,7 +100,9 @@ export function HostRoom() {
                 coverArtUrl={state.currentCoverArtUrl}
                 hostToken={hostToken}
                 busy={busy}
-                onPlay={() => action("play")}
+                onState={setState}
+                onBusy={setBusy}
+                onError={setError}
               />
 
               {state.status !== "finished" && (
@@ -127,30 +110,28 @@ export function HostRoom() {
                   <button
                     className="btn host-ctrl-primary"
                     disabled={busy}
-                    onClick={() => action("play")}
+                    onClick={() => run("play")}
                   >
-                    {state.status === "playing"
-                      ? "Play unlocked"
-                      : "Play 2s"}
+                    {state.status === "playing" ? "Play unlocked" : "Play 2s"}
                   </button>
                   <button
                     className="btn secondary"
                     disabled={busy || state.status !== "playing"}
-                    onClick={() => action("extend")}
+                    onClick={() => run("extend")}
                   >
                     Unlock +{formatClipSeconds(EXTEND_CLIP_MS)}s (−2 pts)
                   </button>
                   <button
                     className="btn secondary"
                     disabled={busy || state.status === "lobby"}
-                    onClick={() => action("reveal")}
+                    onClick={() => run("reveal")}
                   >
                     Reveal
                   </button>
                   <button
                     className="btn danger"
                     disabled={busy}
-                    onClick={() => action("next")}
+                    onClick={() => run("next")}
                   >
                     {state.currentSongIndex + 1 >= state.songCount
                       ? "Finish"

@@ -54,7 +54,7 @@ vercel deploy --yes --prod
 | Upload secret | Optional | Required (`BERGS_MUSIC_UPLOAD_SECRET` or `RIFFRUSH_UPLOAD_SECRET`) |
 | Request body | No 4.5 MB platform cap | Needs `VERCEL_SUPPORT_LARGE_REQUEST_BODY=1` + Performance memory for >4.5 MB |
 | Audio | Host browser only | Same — participants never get `/api/sessions/.../audio` |
-| ffmpeg | Used when installed; byte-trim fallback otherwise | Usually no ffmpeg → byte-trim fallback for clips |
+| Host audio | Full MP3 + client stop timer | Same — no server-side clip trim (avoids broken MP3s without ffmpeg) |
 
 ## After deploy
 

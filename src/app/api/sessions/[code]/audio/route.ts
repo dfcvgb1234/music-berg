@@ -1,14 +1,16 @@
 import { NextResponse } from "next/server";
-import { clipMp3 } from "@/lib/clipAudio";
 import { sql } from "@/lib/db";
 import { getSessionByCode } from "@/lib/quiz";
 import { clientKey, rateLimit } from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
+export const maxDuration = 60;
 
 /**
- * Host-only session audio. Participants never receive clips or full tracks —
- * music plays only on the host device.
+ * Host-only session audio. Always returns the full MP3 for the current song.
+ * Clip length is enforced on the host client (stop timer) so we don't depend
+ * on ffmpeg byte-trimming — which is unavailable on Vercel Hobby and produces
+ * invalid MP3s that appear silent until Reveal sends the untouched file.
  */
 export async function GET(
   request: Request,
@@ -40,7 +42,6 @@ export async function GET(
     return NextResponse.json({ error: "No clip yet" }, { status: 403 });
   }
 
-  // Light query for id only, then load a single blob.
   const meta = await sql<{ id: string }>(
     `select id from songs where template_id = $1
      order by sort_order asc, created_at asc
@@ -61,13 +62,7 @@ export async function GET(
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  const full = Buffer.from(song.audio_data);
-  const revealed = session.status === "revealed";
-  const body = revealed
-    ? full
-    : await clipMp3(full, session.clip_ms / 1000, song.id);
-
-  const bytes = new Uint8Array(body);
+  const bytes = new Uint8Array(Buffer.from(song.audio_data));
   return new NextResponse(bytes, {
     headers: {
       "Content-Type": "audio/mpeg",
