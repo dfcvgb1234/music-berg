@@ -19,7 +19,7 @@ export function isVercelBlobUrl(url: string): boolean {
 }
 
 /** Download a private Blob object into a Buffer (server-side, not via request body). */
-export async function fetchPrivateBlobMp3(url: string): Promise<Buffer> {
+export async function fetchPrivateBlobAudio(url: string): Promise<Buffer> {
   if (!isVercelBlobUrl(url)) {
     throw new Error("Invalid audio blob URL");
   }
@@ -46,6 +46,9 @@ export async function fetchPrivateBlobMp3(url: string): Promise<Buffer> {
   }
   return Buffer.concat(chunks.map((c) => Buffer.from(c)));
 }
+
+/** @deprecated Use fetchPrivateBlobAudio — kept for call-site clarity during Opus migration. */
+export const fetchPrivateBlobMp3 = fetchPrivateBlobAudio;
 
 export async function deleteBlobQuiet(url: string): Promise<void> {
   try {

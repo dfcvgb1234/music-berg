@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { contentDispositionForMime, detectAudioMime } from "@/lib/audioMime";
 import { sql } from "@/lib/db";
 import { getSessionByCode } from "@/lib/quiz";
 import { clientKey, rateLimit } from "@/lib/rateLimit";
@@ -7,7 +8,7 @@ export const runtime = "nodejs";
 export const maxDuration = 60;
 
 /**
- * Host-only session audio. Always returns the full MP3 for the current song.
+ * Host-only session audio. Always returns the full stored file for the current song.
  * Clip length is enforced on the host client (stop timer) so we don't depend
  * on ffmpeg byte-trimming — which is unavailable on Vercel Hobby and produces
  * invalid MP3s that appear silent until Reveal sends the untouched file.
@@ -53,21 +54,28 @@ export async function GET(
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  const rows = await sql<{ id: string; audio_data: Uint8Array | Buffer }>(
-    `select id, audio_data from songs where id = $1`,
-    [songMeta.id],
-  );
+  const rows = await sql<{
+    id: string;
+    mime_type: string;
+    audio_data: Uint8Array | Buffer;
+  }>(`select id, mime_type, audio_data from songs where id = $1`, [
+    songMeta.id,
+  ]);
   const song = rows[0];
   if (!song) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
   const bytes = new Uint8Array(Buffer.from(song.audio_data));
+  const mime =
+    song.mime_type?.trim() ||
+    detectAudioMime(bytes, "audio/mpeg");
+
   return new NextResponse(bytes, {
     headers: {
-      "Content-Type": "audio/mpeg",
+      "Content-Type": mime,
       "X-Content-Type-Options": "nosniff",
-      "Content-Disposition": 'inline; filename="clip.mp3"',
+      "Content-Disposition": contentDispositionForMime(mime),
       "Content-Length": String(bytes.byteLength),
       "Cache-Control": "no-store",
       "Content-Security-Policy": "default-src 'none'; sandbox",

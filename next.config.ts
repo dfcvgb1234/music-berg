@@ -21,8 +21,9 @@ const nextConfig: NextConfig = {
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
           {
             key: "Content-Security-Policy",
+            // wasm-unsafe-eval + blob workers: client ffmpeg.wasm Opus encode on upload.
             value:
-              "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https://*.mzstatic.com; media-src 'self' blob:; connect-src 'self' https://*.blob.vercel-storage.com https://vercel.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+              "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https://*.mzstatic.com; media-src 'self' blob:; connect-src 'self' blob: https://*.blob.vercel-storage.com https://vercel.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
           },
         ],
       },

@@ -1,4 +1,19 @@
 export { formatBytes, uploadLimits } from "@/lib/uploadLimits";
+export {
+  ALLOWED_AUDIO_CONTENT_TYPES,
+  ALLOWED_AUDIO_EXTENSIONS,
+  detectAudioMime,
+  isAllowedAudioContentType,
+  isAllowedAudioExtension,
+  isOggBuffer,
+  isWebmBuffer,
+} from "@/lib/audioMime";
+import {
+  isAllowedAudioContentType,
+  isAllowedAudioExtension,
+  isOggBuffer,
+  isWebmBuffer,
+} from "@/lib/audioMime";
 
 /** True if buffer looks like MP3 (ID3 tag or MPEG frame sync). */
 export function isMp3Buffer(buf: Buffer): boolean {
@@ -11,6 +26,22 @@ export function isMp3Buffer(buf: Buffer): boolean {
     }
   }
   return false;
+}
+
+/** Opus-in-Ogg (preferred), Opus-in-WebM, or legacy MP3. */
+export function isSupportedAudioBuffer(buf: Buffer): boolean {
+  return isOggBuffer(buf) || isWebmBuffer(buf) || isMp3Buffer(buf);
+}
+
+export function assertUploadedAudioFile(file: File): string | null {
+  if (file.size <= 0) return "Empty audio file";
+  if (!isAllowedAudioExtension(file.name)) {
+    return "Only .ogg / .opus / .webm / .mp3 audio is allowed";
+  }
+  if (!isAllowedAudioContentType(file.type)) {
+    return "Unsupported audio content type";
+  }
+  return null;
 }
 
 export function assertUploadAuthorized(request: Request): Response | null {

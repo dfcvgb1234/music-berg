@@ -555,8 +555,79 @@ textarea {
 
 @media (min-width: 720px) {
   .song-row-multi {
-    grid-template-columns: 1.6fr 0.9fr auto;
+    grid-template-columns: 1.4fr 1.2fr auto;
   }
+}
+
+.audio-crop-field {
+  min-width: 0;
+}
+
+.audio-crop-hint {
+  margin: 0.35rem 0 0;
+  font-size: 0.85rem;
+}
+
+.audio-crop-panel {
+  margin-top: 0.75rem;
+  display: grid;
+  gap: 0.65rem;
+  padding: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: calc(var(--radius) - 6px);
+  background: rgba(7, 20, 26, 0.45);
+}
+
+.audio-crop-preview {
+  width: 100%;
+  max-height: 2.5rem;
+}
+
+.audio-crop-sliders {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.audio-crop-sliders label {
+  display: grid;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+  color: var(--steel);
+}
+
+.audio-crop-sliders input[type="range"] {
+  width: 100%;
+  accent-color: var(--mint);
+}
+
+.audio-crop-meta {
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.audio-crop-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.audio-crop-progress {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.audio-crop-progress-bar {
+  height: 0.4rem;
+  border-radius: 999px;
+  background: rgba(232, 255, 246, 0.12);
+  overflow: hidden;
+}
+
+.audio-crop-progress-bar span {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--mint), var(--lime));
+  transition: width 0.2s ease;
 }
 
 .badge {

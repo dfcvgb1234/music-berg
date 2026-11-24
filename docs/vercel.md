@@ -29,7 +29,7 @@ Vercel Hobby rejects request bodies over ~4.5 MB (`FUNCTION_PAYLOAD_TOO_LARGE`).
 2. Ensure the connection includes a **read-write token** env var (`BLOB_READ_WRITE_TOKEN`).
 3. Redeploy.
 
-Flow: browser uploads each MP3 directly to Blob (`/api/blob/upload` token exchange) → `/api/templates` receives JSON with Blob URLs → server pulls bytes from Blob into Postgres. Without `BLOB_READ_WRITE_TOKEN`, the UI falls back to multipart POST (fine locally; will 413 on Hobby for ~5MB files).
+Flow: browser crops + encodes each track to **Opus 96 kbps (Ogg)** via ffmpeg.wasm, uploads the clip to Blob (`/api/blob/upload` token exchange) → `/api/templates` receives JSON with Blob URLs → server pulls bytes from Blob into Postgres. Without `BLOB_READ_WRITE_TOKEN`, the UI falls back to multipart POST of the same Opus files (fine locally). `postinstall`/`prebuild` copy ffmpeg UMD + wasm into `public/ffmpeg/` (gitignored).
 
 ### Attach Postgres
 

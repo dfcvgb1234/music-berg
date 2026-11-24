@@ -1,6 +1,10 @@
 import { handleUpload, type HandleUploadBody } from "@vercel/blob/client";
 import { NextResponse } from "next/server";
-import { assertUploadAuthorized } from "@/lib/audioValidate";
+import {
+  ALLOWED_AUDIO_CONTENT_TYPES,
+  assertUploadAuthorized,
+  isAllowedAudioExtension,
+} from "@/lib/audioValidate";
 import { blobUploadsEnabled } from "@/lib/blobAudio";
 import { clientKey, rateLimit } from "@/lib/rateLimit";
 import { uploadLimits } from "@/lib/uploadLimits";
@@ -10,7 +14,7 @@ export const maxDuration = 60;
 
 /**
  * Client-upload token exchange for Vercel Blob.
- * Browser uploads MP3s directly to Blob (bypasses the ~4.5MB function body cap).
+ * Browser uploads encoded Opus (or legacy MP3) directly to Blob.
  */
 export async function POST(request: Request): Promise<NextResponse> {
   if (!blobUploadsEnabled()) {
@@ -38,21 +42,15 @@ export async function POST(request: Request): Promise<NextResponse> {
       body,
       request,
       onBeforeGenerateToken: async (pathname) => {
-        const lower = pathname.toLowerCase();
-        if (!lower.endsWith(".mp3")) {
-          throw new Error("Only .mp3 uploads are allowed");
+        if (!isAllowedAudioExtension(pathname)) {
+          throw new Error("Only .ogg / .opus / .webm / .mp3 uploads are allowed");
         }
         return {
-          allowedContentTypes: [
-            "audio/mpeg",
-            "audio/mp3",
-            "audio/mpeg3",
-            "application/octet-stream",
-          ],
+          allowedContentTypes: [...ALLOWED_AUDIO_CONTENT_TYPES],
           maximumSizeInBytes: uploadLimits.maxFileBytes,
           addRandomSuffix: true,
           allowOverwrite: false,
-          tokenPayload: JSON.stringify({ kind: "template-mp3" }),
+          tokenPayload: JSON.stringify({ kind: "template-audio" }),
         };
       },
       onUploadCompleted: async () => {

@@ -2,7 +2,12 @@
 
 import { upload } from "@vercel/blob/client";
 import { FormEvent, useEffect, useState } from "react";
+import {
+  AudioCropField,
+  type PreparedAudio,
+} from "@/components/AudioCropField";
 import { TrackPicker, type PickedTrack } from "@/components/TrackPicker";
+import { OPUS_MIME } from "@/lib/audioMime";
 import { readApiJson } from "@/lib/readApiJson";
 import { formatBytes, uploadLimits } from "@/lib/uploadLimits";
 
@@ -10,7 +15,7 @@ type SongDraft = {
   key: string;
   pick: PickedTrack | null;
   extraAnswers: PickedTrack[];
-  file: File | null;
+  audio: PreparedAudio | null;
 };
 
 type UploadMode = "blob" | "direct" | "unknown";
@@ -25,10 +30,18 @@ function allAnswerIds(pick: PickedTrack, extras: PickedTrack[]): string[] {
   ];
 }
 
-function safeMp3Name(file: File, index: number): string {
-  const base = file.name.toLowerCase().endsWith(".mp3")
-    ? file.name.replace(/[^\w.\-]+/g, "_")
-    : `song-${index + 1}.mp3`;
+function safeAudioBlobPath(file: File, index: number): string {
+  const lower = file.name.toLowerCase();
+  const ext = lower.endsWith(".ogg")
+    ? ".ogg"
+    : lower.endsWith(".webm")
+      ? ".webm"
+      : lower.endsWith(".opus")
+        ? ".opus"
+        : lower.endsWith(".mp3")
+          ? ".mp3"
+          : ".ogg";
+  const base = `song-${index + 1}${ext}`.replace(/[^\w.\-]+/g, "_");
   return `templates/${Date.now()}-${index}-${base}`.slice(0, 180);
 }
 
@@ -42,7 +55,7 @@ export function CreateTrackListForm({
   const [name, setName] = useState("");
   const [uploadSecret, setUploadSecret] = useState("");
   const [songs, setSongs] = useState<SongDraft[]>([
-    { key: "1", pick: null, extraAnswers: [], file: null },
+    { key: "1", pick: null, extraAnswers: [], audio: null },
   ]);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -69,15 +82,17 @@ export function CreateTrackListForm({
     try {
       let total = 0;
       for (const song of songs) {
-        if (!song.pick || !song.file) {
-          throw new Error("Each song needs a track pick and an MP3");
-        }
-        if (song.file.size > uploadLimits.maxFileBytes) {
+        if (!song.pick || !song.audio?.file) {
           throw new Error(
-            `“${song.file.name}” is too large (max ${formatBytes(uploadLimits.maxFileBytes)} per file).`,
+            "Each song needs a track pick and a converted Opus clip",
           );
         }
-        total += song.file.size;
+        if (song.audio.file.size > uploadLimits.maxFileBytes) {
+          throw new Error(
+            `“${song.audio.sourceName}” is too large after encode (max ${formatBytes(uploadLimits.maxFileBytes)}).`,
+          );
+        }
+        total += song.audio.file.size;
       }
       if (total > uploadLimits.maxRequestBytes) {
         throw new Error(
@@ -96,7 +111,7 @@ export function CreateTrackListForm({
 
       let res: Response;
       if (uploadMode === "blob") {
-        setStatus("Uploading audio…");
+        setStatus("Uploading Opus clips…");
         const payloadSongs: Array<{
           itunesTrackId: string;
           answerIds: string[];
@@ -105,13 +120,14 @@ export function CreateTrackListForm({
         for (let i = 0; i < songs.length; i++) {
           const song = songs[i];
           const pick = song.pick!;
-          const file = song.file!;
-          const blob = await upload(safeMp3Name(file, i), file, {
+          const file = song.audio!.file;
+          setStatus(`Uploading clip ${i + 1}/${songs.length}…`);
+          const blob = await upload(safeAudioBlobPath(file, i), file, {
             access: "private",
             handleUploadUrl: "/api/blob/upload",
             headers,
             multipart: file.size > 2 * 1024 * 1024,
-            contentType: file.type || "audio/mpeg",
+            contentType: file.type || OPUS_MIME,
           });
           payloadSongs.push({
             itunesTrackId: pick.itunesTrackId,
@@ -132,6 +148,7 @@ export function CreateTrackListForm({
           }),
         });
       } else {
+        setStatus("Saving track list…");
         const form = new FormData();
         form.set("name", name.trim());
         for (const song of songs) {
@@ -141,7 +158,7 @@ export function CreateTrackListForm({
             "itunesAnswerIds",
             JSON.stringify(allAnswerIds(pick, song.extraAnswers)),
           );
-          form.append("songFiles", song.file!);
+          form.append("songFiles", song.audio!.file);
         }
         res = await fetch("/api/templates", {
           method: "POST",
@@ -160,7 +177,7 @@ export function CreateTrackListForm({
       setStatus(`Saved track list “${data.name}”`);
       setName("");
       setSongs([
-        { key: String(Date.now()), pick: null, extraAnswers: [], file: null },
+        { key: String(Date.now()), pick: null, extraAnswers: [], audio: null },
       ]);
       if (data.id && data.name) {
         onCreated?.({
@@ -207,12 +224,12 @@ export function CreateTrackListForm({
 
       <p className="muted" style={{ margin: 0 }}>
         Search and pick each track (similar remasters are grouped). Optionally
-        add more accepted answers, then upload a short MP3 (max{" "}
-        {formatBytes(uploadLimits.maxFileBytes)} each,{" "}
-        {formatBytes(uploadLimits.maxRequestBytes)} total)
+        add more accepted answers, then crop and convert audio to Opus 96 kbps
+        (max {formatBytes(uploadLimits.maxFileBytes)} each after encode
         {uploadMode === "blob"
-          ? ". Audio uploads go directly to storage (Vercel-safe)."
-          : "."}
+          ? "; uploads go directly to storage"
+          : ""}
+        ).
       </p>
 
       <div className="song-rows">
@@ -240,27 +257,23 @@ export function CreateTrackListForm({
               }}
               placeholder="Search title or artist…"
             />
-            <div className="field">
-              <label htmlFor={`song-file-${song.key}`}>MP3 file</label>
-              <input
-                id={`song-file-${song.key}`}
-                type="file"
-                accept="audio/mpeg,audio/mp3,.mp3,audio/*"
-                onChange={(e) => {
-                  const file = e.target.files?.[0] ?? null;
-                  setSongs((prev) => {
-                    const next = [...prev];
-                    next[index] = { ...next[index], file };
-                    return next;
-                  });
-                }}
-                required
-              />
-            </div>
+            <AudioCropField
+              id={`song-file-${song.key}`}
+              label={`Song ${index + 1} audio`}
+              value={song.audio}
+              disabled={busy}
+              onChange={(audio) => {
+                setSongs((prev) => {
+                  const next = [...prev];
+                  next[index] = { ...next[index], audio };
+                  return next;
+                });
+              }}
+            />
             <button
               type="button"
               className="btn secondary"
-              disabled={songs.length === 1}
+              disabled={songs.length === 1 || busy}
               onClick={() => setSongs(songs.filter((s) => s.key !== song.key))}
             >
               Remove
@@ -273,6 +286,7 @@ export function CreateTrackListForm({
         <button
           type="button"
           className="btn secondary"
+          disabled={busy}
           onClick={() =>
             setSongs([
               ...songs,
@@ -280,7 +294,7 @@ export function CreateTrackListForm({
                 key: String(Date.now()),
                 pick: null,
                 extraAnswers: [],
-                file: null,
+                audio: null,
               },
             ])
           }
@@ -298,7 +312,7 @@ export function CreateTrackListForm({
           disabled={
             busy ||
             uploadMode === "unknown" ||
-            songs.some((s) => !s.pick || !s.file)
+            songs.some((s) => !s.pick || !s.audio?.file)
           }
         >
           {busy ? "Saving…" : "Save track list"}

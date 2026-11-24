@@ -1,13 +1,15 @@
 import { NextResponse } from "next/server";
 import {
   assertUploadAuthorized,
+  assertUploadedAudioFile,
+  detectAudioMime,
   formatBytes,
-  isMp3Buffer,
+  isSupportedAudioBuffer,
   uploadLimits,
 } from "@/lib/audioValidate";
 import {
   deleteBlobQuiet,
-  fetchPrivateBlobMp3,
+  fetchPrivateBlobAudio,
 } from "@/lib/blobAudio";
 import { sql } from "@/lib/db";
 import { newId } from "@/lib/ids";
@@ -84,13 +86,14 @@ type Validated = {
   fingerprints: string[];
   coverArtUrl: string | null;
   buf: Buffer;
+  mimeType: string;
   blobUrl?: string;
 };
 
 async function validateSongs(inputs: SongInput[]): Promise<Validated[] | Response> {
   if (inputs.length === 0) {
     return NextResponse.json(
-      { error: "Add at least one track pick + MP3" },
+      { error: "Add at least one track pick + audio file" },
       { status: 400 },
     );
   }
@@ -141,7 +144,7 @@ async function validateSongs(inputs: SongInput[]): Promise<Validated[] | Respons
 
     if (input.blobUrl) {
       try {
-        buf = await fetchPrivateBlobMp3(input.blobUrl);
+        buf = await fetchPrivateBlobAudio(input.blobUrl);
         blobUrl = input.blobUrl;
       } catch (err) {
         return NextResponse.json(
@@ -159,45 +162,34 @@ async function validateSongs(inputs: SongInput[]): Promise<Validated[] | Respons
       if (file.size <= 0 || file.size > uploadLimits.maxFileBytes) {
         return NextResponse.json(
           {
-            error: `Each MP3 must be under ${formatBytes(uploadLimits.maxFileBytes)}`,
+            error: `Each audio file must be under ${formatBytes(uploadLimits.maxFileBytes)}`,
           },
           { status: 400 },
         );
       }
-      const lower = file.name.toLowerCase();
-      if (!lower.endsWith(".mp3")) {
-        return NextResponse.json(
-          { error: "Only .mp3 files are allowed" },
-          { status: 400 },
-        );
-      }
-      const reported = (file.type || "").toLowerCase();
-      if (
-        reported &&
-        reported !== "application/octet-stream" &&
-        !reported.includes("audio/mpeg") &&
-        !reported.includes("audio/mp3") &&
-        reported !== "audio/mpeg3"
-      ) {
-        return NextResponse.json(
-          { error: "Only MP3 audio is allowed" },
-          { status: 400 },
-        );
+      const fileErr = assertUploadedAudioFile(file);
+      if (fileErr) {
+        return NextResponse.json({ error: fileErr }, { status: 400 });
       }
       buf = Buffer.from(await file.arrayBuffer());
     } else {
       return NextResponse.json(
-        { error: "Each song needs an MP3 upload" },
+        { error: "Each song needs an audio upload" },
         { status: 400 },
       );
     }
 
-    if (!isMp3Buffer(buf)) {
+    if (!isSupportedAudioBuffer(buf)) {
       return NextResponse.json(
-        { error: "File content is not a valid MP3" },
+        {
+          error:
+            "File content is not valid Opus (Ogg/WebM) or MP3. Convert on the client before upload.",
+        },
         { status: 400 },
       );
     }
+
+    const mimeType = detectAudioMime(buf, "audio/ogg");
 
     totalBytes += buf.length;
     if (totalBytes > uploadLimits.maxRequestBytes) {
@@ -212,6 +204,7 @@ async function validateSongs(inputs: SongInput[]): Promise<Validated[] | Respons
       fingerprints: [...fingerprints],
       coverArtUrl: primary.coverArtUrl,
       buf,
+      mimeType,
       blobUrl,
     });
   }
@@ -238,7 +231,7 @@ async function insertTemplate(
         newId(),
         templateId,
         song.displayName,
-        "audio/mpeg",
+        song.mimeType,
         song.buf,
         i,
         song.itunesTrackId,
@@ -305,7 +298,7 @@ export async function POST(request: Request) {
     return NextResponse.json(created);
   }
 
-  // Local / legacy multipart path (request body carries MP3 bytes).
+  // Local / legacy multipart path (request body carries audio bytes).
   const contentLength = Number(request.headers.get("content-length") ?? "0");
   if (
     Number.isFinite(contentLength) &&
@@ -313,7 +306,7 @@ export async function POST(request: Request) {
   ) {
     return NextResponse.json(
       {
-        error: `Upload too large (max ${formatBytes(uploadLimits.maxRequestBytes)} total). Use shorter MP3s.`,
+        error: `Upload too large (max ${formatBytes(uploadLimits.maxRequestBytes)} total). Use shorter clips.`,
       },
       { status: 413 },
     );
@@ -334,13 +327,13 @@ export async function POST(request: Request) {
 
   if (itunesIds.length === 0 || files.length === 0) {
     return NextResponse.json(
-      { error: "Add at least one track pick + MP3" },
+      { error: "Add at least one track pick + audio file" },
       { status: 400 },
     );
   }
   if (itunesIds.length !== files.length) {
     return NextResponse.json(
-      { error: "Each song needs a track pick and an MP3" },
+      { error: "Each song needs a track pick and an audio file" },
       { status: 400 },
     );
   }

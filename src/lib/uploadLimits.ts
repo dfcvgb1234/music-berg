@@ -1,4 +1,4 @@
-/** App-level caps for template MP3 uploads (several ~5MB songs). */
+/** App-level caps for template audio uploads (Opus clips / legacy MP3). */
 export const uploadLimits = {
   maxFileBytes: 6 * 1024 * 1024,
   maxSongsPerTemplate: 8,
