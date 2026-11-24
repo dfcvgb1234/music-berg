@@ -2,7 +2,11 @@ import { NextResponse } from "next/server";
 import { sql } from "@/lib/db";
 import { newId } from "@/lib/ids";
 import { answersMatch, pointsForClip } from "@/lib/normalize";
-import { broadcastSession, getSessionByCode } from "@/lib/quiz";
+import {
+  broadcastSession,
+  getSessionByCode,
+  publicState,
+} from "@/lib/quiz";
 
 export const runtime = "nodejs";
 
@@ -21,7 +25,11 @@ export async function POST(
     return NextResponse.json({ error: "Join the quiz first" }, { status: 401 });
   }
 
-  const participants = await sql<{ id: string; display_name: string; score: number }>(
+  const participants = await sql<{
+    id: string;
+    display_name: string;
+    score: number;
+  }>(
     `select id, display_name, score from participants
      where session_id = $1 and token = $2`,
     [session.id, participantToken],
@@ -94,7 +102,8 @@ export async function POST(
   return NextResponse.json({
     correct,
     points,
+    // Only confirm the title after a correct guess for this player.
     answer: correct ? song.display_name : undefined,
-    state,
+    state: state ? publicState(state) : null,
   });
 }

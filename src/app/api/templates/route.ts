@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
-import { assertUploadAuthorized, isMp3Buffer, uploadLimits } from "@/lib/audioValidate";
+import {
+  assertUploadAuthorized,
+  isMp3Buffer,
+  uploadLimits,
+} from "@/lib/audioValidate";
 import { sql } from "@/lib/db";
 import { newId } from "@/lib/ids";
 import { clientKey, rateLimit } from "@/lib/rateLimit";
@@ -12,8 +16,8 @@ type TemplateRow = {
   created_at: string;
   song_count: string;
 };
-type SongMeta = { id: string; display_name: string; sort_order: number };
 
+/** Public list: template id/name/count only — never song titles or IDs (answers). */
 export async function GET() {
   const templates = await sql<TemplateRow>(
     `select t.id, t.name, t.created_at,
@@ -22,28 +26,14 @@ export async function GET() {
      order by t.created_at desc`,
   );
 
-  const withSongs = await Promise.all(
-    templates.map(async (t) => {
-      const songs = await sql<SongMeta>(
-        `select id, display_name, sort_order from songs
-         where template_id = $1 order by sort_order asc, created_at asc`,
-        [t.id],
-      );
-      return {
-        id: t.id,
-        name: t.name,
-        createdAt: t.created_at,
-        songCount: Number(t.song_count),
-        songs: songs.map((s) => ({
-          id: s.id,
-          displayName: s.display_name,
-          sortOrder: s.sort_order,
-        })),
-      };
-    }),
-  );
-
-  return NextResponse.json({ templates: withSongs });
+  return NextResponse.json({
+    templates: templates.map((t) => ({
+      id: t.id,
+      name: t.name,
+      createdAt: t.created_at,
+      songCount: Number(t.song_count),
+    })),
+  });
 }
 
 export async function POST(request: Request) {
@@ -76,18 +66,25 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Template name is required" }, { status: 400 });
   }
 
-  const songNames = form.getAll("songNames").map((v) => String(v).trim().slice(0, 80));
+  const songNames = form
+    .getAll("songNames")
+    .map((v) => String(v).trim().slice(0, 80));
   const files = form.getAll("songFiles");
 
   if (songNames.length === 0 || files.length === 0) {
     return NextResponse.json({ error: "Add at least one song" }, { status: 400 });
   }
   if (songNames.length !== files.length) {
-    return NextResponse.json({ error: "Each song needs a name and MP3" }, { status: 400 });
+    return NextResponse.json(
+      { error: "Each song needs a name and MP3" },
+      { status: 400 },
+    );
   }
   if (songNames.length > uploadLimits.maxSongsPerTemplate) {
     return NextResponse.json(
-      { error: `At most ${uploadLimits.maxSongsPerTemplate} songs per template` },
+      {
+        error: `At most ${uploadLimits.maxSongsPerTemplate} songs per template`,
+      },
       { status: 400 },
     );
   }
@@ -117,7 +114,10 @@ export async function POST(request: Request) {
 
     const lower = file.name.toLowerCase();
     if (!lower.endsWith(".mp3")) {
-      return NextResponse.json({ error: "Only .mp3 files are allowed" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Only .mp3 files are allowed" },
+        { status: 400 },
+      );
     }
     const reported = (file.type || "").toLowerCase();
     if (
@@ -127,7 +127,10 @@ export async function POST(request: Request) {
       !reported.includes("audio/mp3") &&
       reported !== "audio/mpeg3"
     ) {
-      return NextResponse.json({ error: "Only MP3 audio is allowed" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Only MP3 audio is allowed" },
+        { status: 400 },
+      );
     }
 
     const buf = Buffer.from(await file.arrayBuffer());
@@ -141,7 +144,10 @@ export async function POST(request: Request) {
   }
 
   const templateId = newId();
-  await sql(`insert into templates (id, name) values ($1, $2)`, [templateId, name]);
+  await sql(`insert into templates (id, name) values ($1, $2)`, [
+    templateId,
+    name,
+  ]);
 
   for (let i = 0; i < validated.length; i++) {
     const song = validated[i];
@@ -152,5 +158,9 @@ export async function POST(request: Request) {
     );
   }
 
-  return NextResponse.json({ id: templateId, name });
+  return NextResponse.json({
+    id: templateId,
+    name,
+    songCount: validated.length,
+  });
 }

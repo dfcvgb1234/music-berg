@@ -133,10 +133,12 @@ export function PlayRoom() {
             )}
 
             <ClipPlayer
+              code={code}
               songId={state?.currentSongId ?? null}
               clipMs={state?.clipMs ?? 1000}
               playToken={state?.playToken ?? 0}
               active={state?.status === "playing"}
+              participantToken={player.token}
             />
 
             {state?.currentSongName && (

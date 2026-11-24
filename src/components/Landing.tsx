@@ -3,12 +3,10 @@
 import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
 
-type TemplateSong = { id: string; displayName: string; sortOrder: number };
 type Template = {
   id: string;
   name: string;
   songCount: number;
-  songs: TemplateSong[];
 };
 
 type SongDraft = { key: string; name: string; file: File | null };
@@ -202,9 +200,6 @@ export function Landing() {
                   <strong>{t.name}</strong>
                   <p className="muted" style={{ margin: "0.35rem 0 0" }}>
                     {t.songCount} song{t.songCount === 1 ? "" : "s"}
-                    {t.songs.length
-                      ? ` — ${t.songs.map((s) => s.displayName).join(", ")}`
-                      : ""}
                   </p>
                 </li>
               ))}

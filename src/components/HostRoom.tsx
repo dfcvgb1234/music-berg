@@ -118,10 +118,12 @@ export function HostRoom() {
               )}
 
               <ClipPlayer
+                code={code}
                 songId={state.currentSongId}
                 clipMs={state.clipMs}
                 playToken={state.playToken}
                 active={state.status === "playing"}
+                hostToken={hostToken}
               />
 
               {state.status !== "finished" && (
