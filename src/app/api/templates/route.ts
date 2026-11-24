@@ -5,9 +5,18 @@ import {
   isMp3Buffer,
   uploadLimits,
 } from "@/lib/audioValidate";
+import {
+  deleteBlobQuiet,
+  fetchPrivateBlobMp3,
+} from "@/lib/blobAudio";
 import { sql } from "@/lib/db";
 import { newId } from "@/lib/ids";
-import { formatTrackLabel, getTrack, getTracks, trackFingerprint } from "@/lib/itunes";
+import {
+  formatTrackLabel,
+  getTrack,
+  getTracks,
+  trackFingerprint,
+} from "@/lib/itunes";
 import { clientKey, rateLimit } from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
@@ -51,9 +60,198 @@ function parseAnswerIds(raw: unknown, primaryId: string): string[] {
     } catch {
       ids = [];
     }
+  } else if (Array.isArray(raw)) {
+    ids = raw.map((v) => String(v).trim()).filter((v) => /^\d+$/.test(v));
   }
   if (!ids.includes(primaryId)) ids.unshift(primaryId);
   return [...new Set(ids)].slice(0, 20);
+}
+
+type SongInput = {
+  itunesTrackId: string;
+  answerIds: string[];
+  /** Private Vercel Blob URL (Hobby-safe path). */
+  blobUrl?: string;
+  /** Multipart file (local / small direct uploads). */
+  file?: File;
+};
+
+type Validated = {
+  displayName: string;
+  artist: string;
+  itunesTrackId: string;
+  answerIds: string[];
+  fingerprints: string[];
+  coverArtUrl: string | null;
+  buf: Buffer;
+  blobUrl?: string;
+};
+
+async function validateSongs(inputs: SongInput[]): Promise<Validated[] | Response> {
+  if (inputs.length === 0) {
+    return NextResponse.json(
+      { error: "Add at least one track pick + MP3" },
+      { status: 400 },
+    );
+  }
+  if (inputs.length > uploadLimits.maxSongsPerTemplate) {
+    return NextResponse.json(
+      {
+        error: `At most ${uploadLimits.maxSongsPerTemplate} songs per track list`,
+      },
+      { status: 400 },
+    );
+  }
+
+  const validated: Validated[] = [];
+  let totalBytes = 0;
+
+  for (const input of inputs) {
+    const itunesId = input.itunesTrackId;
+    if (!itunesId || !/^\d+$/.test(itunesId)) {
+      return NextResponse.json(
+        { error: "Each song must be picked from search results" },
+        { status: 400 },
+      );
+    }
+    const answerIds = parseAnswerIds(input.answerIds, itunesId);
+    const lookedUp = await getTracks(answerIds);
+    const primary = lookedUp.get(itunesId) ?? (await getTrack(itunesId));
+    if (!primary) {
+      return NextResponse.json(
+        { error: "Invalid track selection" },
+        { status: 400 },
+      );
+    }
+    const confirmed = answerIds.filter(
+      (id) => id === itunesId || lookedUp.has(id),
+    );
+    if (!confirmed.includes(itunesId)) confirmed.unshift(itunesId);
+
+    const fingerprints = new Set<string>([
+      trackFingerprint(primary.artist, primary.title),
+    ]);
+    for (const id of confirmed) {
+      const hit = lookedUp.get(id);
+      if (hit) fingerprints.add(trackFingerprint(hit.artist, hit.title));
+    }
+
+    let buf: Buffer;
+    let blobUrl: string | undefined;
+
+    if (input.blobUrl) {
+      try {
+        buf = await fetchPrivateBlobMp3(input.blobUrl);
+        blobUrl = input.blobUrl;
+      } catch (err) {
+        return NextResponse.json(
+          {
+            error:
+              err instanceof Error
+                ? err.message
+                : "Could not read uploaded audio",
+          },
+          { status: 400 },
+        );
+      }
+    } else if (input.file instanceof File) {
+      const file = input.file;
+      if (file.size <= 0 || file.size > uploadLimits.maxFileBytes) {
+        return NextResponse.json(
+          {
+            error: `Each MP3 must be under ${formatBytes(uploadLimits.maxFileBytes)}`,
+          },
+          { status: 400 },
+        );
+      }
+      const lower = file.name.toLowerCase();
+      if (!lower.endsWith(".mp3")) {
+        return NextResponse.json(
+          { error: "Only .mp3 files are allowed" },
+          { status: 400 },
+        );
+      }
+      const reported = (file.type || "").toLowerCase();
+      if (
+        reported &&
+        reported !== "application/octet-stream" &&
+        !reported.includes("audio/mpeg") &&
+        !reported.includes("audio/mp3") &&
+        reported !== "audio/mpeg3"
+      ) {
+        return NextResponse.json(
+          { error: "Only MP3 audio is allowed" },
+          { status: 400 },
+        );
+      }
+      buf = Buffer.from(await file.arrayBuffer());
+    } else {
+      return NextResponse.json(
+        { error: "Each song needs an MP3 upload" },
+        { status: 400 },
+      );
+    }
+
+    if (!isMp3Buffer(buf)) {
+      return NextResponse.json(
+        { error: "File content is not a valid MP3" },
+        { status: 400 },
+      );
+    }
+
+    totalBytes += buf.length;
+    if (totalBytes > uploadLimits.maxRequestBytes) {
+      return NextResponse.json({ error: "Request too large" }, { status: 413 });
+    }
+
+    validated.push({
+      displayName: formatTrackLabel(primary),
+      artist: primary.artist,
+      itunesTrackId: primary.id,
+      answerIds: confirmed,
+      fingerprints: [...fingerprints],
+      coverArtUrl: primary.coverArtUrl,
+      buf,
+      blobUrl,
+    });
+  }
+
+  return validated;
+}
+
+async function insertTemplate(
+  name: string,
+  validated: Validated[],
+): Promise<{ id: string; name: string; songCount: number }> {
+  const templateId = newId();
+  await sql(`insert into templates (id, name) values ($1, $2)`, [
+    templateId,
+    name,
+  ]);
+
+  for (let i = 0; i < validated.length; i++) {
+    const song = validated[i];
+    await sql(
+      `insert into songs (id, template_id, display_name, mime_type, audio_data, sort_order, itunes_track_id, cover_art_url, artist_credit, itunes_answer_ids, answer_fingerprint)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+      [
+        newId(),
+        templateId,
+        song.displayName,
+        "audio/mpeg",
+        song.buf,
+        i,
+        song.itunesTrackId,
+        song.coverArtUrl,
+        song.artist,
+        JSON.stringify(song.answerIds),
+        JSON.stringify(song.fingerprints),
+      ],
+    );
+    if (song.blobUrl) await deleteBlobQuiet(song.blobUrl);
+  }
+
+  return { id: templateId, name, songCount: validated.length };
 }
 
 export async function POST(request: Request) {
@@ -65,6 +263,49 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Too many uploads" }, { status: 429 });
   }
 
+  const existing = await sql<{ count: string }>(
+    `select count(*)::text as count from templates`,
+  );
+  if (Number(existing[0]?.count ?? 0) >= uploadLimits.maxTemplates) {
+    return NextResponse.json(
+      { error: "Track list limit reached" },
+      { status: 400 },
+    );
+  }
+
+  const contentType = request.headers.get("content-type") ?? "";
+
+  // Hobby-safe path: small JSON with private Blob URLs (files already uploaded).
+  if (contentType.includes("application/json")) {
+    const body = (await request.json().catch(() => null)) as {
+      name?: string;
+      songs?: Array<{
+        itunesTrackId?: string;
+        answerIds?: unknown;
+        blobUrl?: string;
+      }>;
+    } | null;
+    const name = String(body?.name ?? "").trim().slice(0, 80);
+    if (!name) {
+      return NextResponse.json(
+        { error: "Track list name is required" },
+        { status: 400 },
+      );
+    }
+    const inputs: SongInput[] = (body?.songs ?? []).map((s) => ({
+      itunesTrackId: String(s.itunesTrackId ?? "").trim(),
+      answerIds: Array.isArray(s.answerIds)
+        ? s.answerIds.map((v) => String(v))
+        : [],
+      blobUrl: String(s.blobUrl ?? "").trim() || undefined,
+    }));
+    const validated = await validateSongs(inputs);
+    if (validated instanceof Response) return validated;
+    const created = await insertTemplate(name, validated);
+    return NextResponse.json(created);
+  }
+
+  // Local / legacy multipart path (request body carries MP3 bytes).
   const contentLength = Number(request.headers.get("content-length") ?? "0");
   if (
     Number.isFinite(contentLength) &&
@@ -75,16 +316,6 @@ export async function POST(request: Request) {
         error: `Upload too large (max ${formatBytes(uploadLimits.maxRequestBytes)} total). Use shorter MP3s.`,
       },
       { status: 413 },
-    );
-  }
-
-  const existing = await sql<{ count: string }>(
-    `select count(*)::text as count from templates`,
-  );
-  if (Number(existing[0]?.count ?? 0) >= uploadLimits.maxTemplates) {
-    return NextResponse.json(
-      { error: "Track list limit reached" },
-      { status: 400 },
     );
   }
 
@@ -113,146 +344,15 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   }
-  if (itunesIds.length > uploadLimits.maxSongsPerTemplate) {
-    return NextResponse.json(
-      {
-        error: `At most ${uploadLimits.maxSongsPerTemplate} songs per track list`,
-      },
-      { status: 400 },
-    );
-  }
 
-  type Validated = {
-    displayName: string;
-    artist: string;
-    itunesTrackId: string;
-    answerIds: string[];
-    /** JSON array of normalized artist|title fingerprints. */
-    fingerprints: string[];
-    coverArtUrl: string | null;
-    buf: Buffer;
-  };
-  const validated: Validated[] = [];
-  let totalBytes = 0;
+  const inputs: SongInput[] = itunesIds.map((itunesTrackId, i) => ({
+    itunesTrackId,
+    answerIds: parseAnswerIds(answerIdBlobs[i], itunesTrackId),
+    file: files[i] instanceof File ? files[i] : undefined,
+  }));
 
-  for (let i = 0; i < itunesIds.length; i++) {
-    const itunesId = itunesIds[i];
-    const file = files[i];
-    if (!itunesId || !/^\d+$/.test(itunesId)) {
-      return NextResponse.json(
-        { error: "Each song must be picked from search results" },
-        { status: 400 },
-      );
-    }
-    const answerIds = parseAnswerIds(answerIdBlobs[i], itunesId);
-    const lookedUp = await getTracks(answerIds);
-    const primary = lookedUp.get(itunesId) ?? (await getTrack(itunesId));
-    if (!primary) {
-      return NextResponse.json(
-        { error: "Invalid track selection" },
-        { status: 400 },
-      );
-    }
-    // Keep only ids that resolve; always include primary.
-    const confirmed = answerIds.filter(
-      (id) => id === itunesId || lookedUp.has(id),
-    );
-    if (!confirmed.includes(itunesId)) confirmed.unshift(itunesId);
-
-    // Fingerprints for every allowed answer so remasters of extras also match.
-    const fingerprints = new Set<string>([
-      trackFingerprint(primary.artist, primary.title),
-    ]);
-    for (const id of confirmed) {
-      const hit = lookedUp.get(id);
-      if (hit) fingerprints.add(trackFingerprint(hit.artist, hit.title));
-    }
-
-    if (!(file instanceof File)) {
-      return NextResponse.json({ error: "Invalid audio file" }, { status: 400 });
-    }
-    if (file.size <= 0 || file.size > uploadLimits.maxFileBytes) {
-      return NextResponse.json(
-        {
-          error: `Each MP3 must be under ${formatBytes(uploadLimits.maxFileBytes)}`,
-        },
-        { status: 400 },
-      );
-    }
-    totalBytes += file.size;
-    if (totalBytes > uploadLimits.maxRequestBytes) {
-      return NextResponse.json({ error: "Request too large" }, { status: 413 });
-    }
-
-    const lower = file.name.toLowerCase();
-    if (!lower.endsWith(".mp3")) {
-      return NextResponse.json(
-        { error: "Only .mp3 files are allowed" },
-        { status: 400 },
-      );
-    }
-    const reported = (file.type || "").toLowerCase();
-    if (
-      reported &&
-      reported !== "application/octet-stream" &&
-      !reported.includes("audio/mpeg") &&
-      !reported.includes("audio/mp3") &&
-      reported !== "audio/mpeg3"
-    ) {
-      return NextResponse.json(
-        { error: "Only MP3 audio is allowed" },
-        { status: 400 },
-      );
-    }
-
-    const buf = Buffer.from(await file.arrayBuffer());
-    if (!isMp3Buffer(buf)) {
-      return NextResponse.json(
-        { error: "File content is not a valid MP3" },
-        { status: 400 },
-      );
-    }
-    validated.push({
-      displayName: formatTrackLabel(primary),
-      artist: primary.artist,
-      itunesTrackId: primary.id,
-      answerIds: confirmed,
-      fingerprints: [...fingerprints],
-      coverArtUrl: primary.coverArtUrl,
-      buf,
-    });
-  }
-
-  const templateId = newId();
-  await sql(`insert into templates (id, name) values ($1, $2)`, [
-    templateId,
-    name,
-  ]);
-
-  for (let i = 0; i < validated.length; i++) {
-    const song = validated[i];
-    await sql(
-      `insert into songs (id, template_id, display_name, mime_type, audio_data, sort_order, itunes_track_id, cover_art_url, artist_credit, itunes_answer_ids, answer_fingerprint)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-      [
-        newId(),
-        templateId,
-        song.displayName,
-        "audio/mpeg",
-        song.buf,
-        i,
-        song.itunesTrackId,
-        song.coverArtUrl,
-        song.artist,
-        JSON.stringify(song.answerIds),
-        JSON.stringify(song.fingerprints),
-      ],
-    );
-  }
-
-  return NextResponse.json({
-    id: templateId,
-    name,
-    songCount: validated.length,
-  });
+  const validated = await validateSongs(inputs);
+  if (validated instanceof Response) return validated;
+  const created = await insertTemplate(name, validated);
+  return NextResponse.json(created);
 }

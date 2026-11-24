@@ -17,4 +17,4 @@ Realtime music quiz: short clips, longer extends, race the room to name the trac
 
 ## Deploy on Vercel
 
-See [docs/vercel.md](docs/vercel.md). You need `DATABASE_URL` (Postgres), an upload secret, and for ~5MB MP3 uploads: `VERCEL_SUPPORT_LARGE_REQUEST_BODY=1` plus Function CPU → Performance (4GB).
+See [docs/vercel.md](docs/vercel.md). You need `DATABASE_URL` (Postgres), an upload secret, and for Hobby-safe ~5MB MP3s: a private Blob store with `BLOB_READ_WRITE_TOKEN` (client uploads bypass the 4.5MB function body cap).

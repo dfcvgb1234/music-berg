@@ -13,22 +13,23 @@ Set these in **Project → Settings → Environment Variables** for Production (
 | `DATABASE_URL` | **Yes** | Postgres connection string (Vercel Postgres / Neon / any Postgres). Also set `DATABASE_URL_UNPOOLED` to the same (or unpooled) URL if your provider offers it — used by `scripts/migrate.mjs` at build. |
 | `BERGS_MUSIC_UPLOAD_SECRET` | **Yes** (or legacy name) | Shared secret for creating track lists. Clients send it as header `x-upload-secret`. |
 | `RIFFRUSH_UPLOAD_SECRET` | Legacy alias | Still accepted if `BERGS_MUSIC_UPLOAD_SECRET` is unset. |
-| `VERCEL_SUPPORT_LARGE_REQUEST_BODY` | **Yes for ~5MB+ uploads** | Set to `1`. Raises the Vercel Function request body cap from **4.5 MB → 20 MiB** (public beta). Without this, template create returns **HTTP 413** for typical MP3s. |
+| `BLOB_READ_WRITE_TOKEN` | **Yes (Hobby-safe uploads)** | Read-write token for private Blob store (e.g. `bergs-music-audio`). Enables browser → Blob uploads so `/api/templates` only receives small JSON (avoids the ~4.5 MB function body cap on Hobby). |
+| `BLOB_STORE_ID` | Optional | Added automatically when the Blob store is connected via the dashboard. |
+| `VERCEL_SUPPORT_LARGE_REQUEST_BODY` | Optional | Only helps on Pro/Enterprise with **Performance (4GB)** Function CPU (20 MiB body beta). **Hobby cannot use Performance**, so prefer Blob uploads instead. |
 
 Generate a strong secret, e.g. `openssl rand -hex 24`.
 
-### Large uploads (HTTP 413 fix)
+### Large uploads (Hobby / HTTP 413 fix)
 
-Vercel rejects bodies over ~4.5 MB before Next.js runs (`FUNCTION_PAYLOAD_TOO_LARGE`). Local `next start` has no such cap, which is why uploads work locally.
+Vercel Hobby rejects request bodies over ~4.5 MB (`FUNCTION_PAYLOAD_TOO_LARGE`). Local `next start` has no such cap.
 
-To allow ~5 MB (and multi-song) template creates:
+**Preferred path (Hobby-safe):** connect a **private** Vercel Blob store and set `BLOB_READ_WRITE_TOKEN`.
 
-1. Enable **Fluid compute** (default on new projects).
-2. Set **Function CPU → Performance (4 GB / 2 vCPU)** in Project → Settings → Functions (Pro/Enterprise; required for the 20 MiB body beta).
-3. Set env `VERCEL_SUPPORT_LARGE_REQUEST_BODY=1` for Production (and Preview if needed).
-4. Redeploy.
+1. Create/connect private Blob store `bergs-music-audio` to project `bergs-music`.
+2. Ensure the connection includes a **read-write token** env var (`BLOB_READ_WRITE_TOKEN`).
+3. Redeploy.
 
-Repo already sets Next.js `experimental.proxyClientMaxBodySize` / `serverActions.bodySizeLimit` to `50mb`, `runtime = "nodejs"` + `maxDuration = 60` on `/api/templates`, and `vercel.json` function `maxDuration`.
+Flow: browser uploads each MP3 directly to Blob (`/api/blob/upload` token exchange) → `/api/templates` receives JSON with Blob URLs → server pulls bytes from Blob into Postgres. Without `BLOB_READ_WRITE_TOKEN`, the UI falls back to multipart POST (fine locally; will 413 on Hobby for ~5MB files).
 
 ### Attach Postgres
 

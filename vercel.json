@@ -3,6 +3,9 @@
   "functions": {
     "src/app/api/templates/route.ts": {
       "maxDuration": 60
+    },
+    "src/app/api/blob/upload/route.ts": {
+      "maxDuration": 60
     }
   }
 }
