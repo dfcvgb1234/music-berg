@@ -167,9 +167,10 @@ export function AudioCropField({
     } catch (err) {
       onChange(null);
       setProgress(null);
-      setLocalError(
-        err instanceof Error ? err.message : "Encoding failed",
-      );
+      const message =
+        err instanceof Error ? err.message : String(err ?? "Encoding failed");
+      console.error("[bergs-music:opus]", "UI convert failed", message, err);
+      setLocalError(message);
     } finally {
       setEncoding(false);
     }
