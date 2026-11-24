@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import {
   assertUploadAuthorized,
+  formatBytes,
   isMp3Buffer,
   uploadLimits,
 } from "@/lib/audioValidate";
@@ -46,8 +47,16 @@ export async function POST(request: Request) {
   }
 
   const contentLength = Number(request.headers.get("content-length") ?? "0");
-  if (contentLength > uploadLimits.maxRequestBytes) {
-    return NextResponse.json({ error: "Request too large" }, { status: 413 });
+  if (
+    Number.isFinite(contentLength) &&
+    contentLength > uploadLimits.maxRequestBytes
+  ) {
+    return NextResponse.json(
+      {
+        error: `Upload too large (max ${formatBytes(uploadLimits.maxRequestBytes)} total). Use shorter MP3s.`,
+      },
+      { status: 413 },
+    );
   }
 
   const existing = await sql<{ count: string }>(
@@ -103,7 +112,9 @@ export async function POST(request: Request) {
     }
     if (file.size <= 0 || file.size > uploadLimits.maxFileBytes) {
       return NextResponse.json(
-        { error: "Each MP3 must be under 5MB" },
+        {
+          error: `Each MP3 must be under ${formatBytes(uploadLimits.maxFileBytes)}`,
+        },
         { status: 400 },
       );
     }

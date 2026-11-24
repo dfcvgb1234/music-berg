@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
+import { readApiJson } from "@/lib/readApiJson";
+import { formatBytes, uploadLimits } from "@/lib/uploadLimits";
 
 type Template = {
   id: string;
@@ -11,10 +13,16 @@ type Template = {
 
 type SongDraft = { key: string; name: string; file: File | null };
 
+function isLocalHost(): boolean {
+  if (typeof window === "undefined") return true;
+  const h = window.location.hostname;
+  return h === "localhost" || h === "127.0.0.1";
+}
+
 export function Landing() {
   const [templates, setTemplates] = useState<Template[]>([]);
   const [templateName, setTemplateName] = useState("");
-  const [uploadSecret, setUploadSecret] = useState("local-dev-upload");
+  const [uploadSecret, setUploadSecret] = useState("");
   const [songs, setSongs] = useState<SongDraft[]>([
     { key: "1", name: "", file: null },
   ]);
@@ -22,11 +30,19 @@ export function Landing() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  useEffect(() => {
+    if (isLocalHost()) setUploadSecret("local-dev-upload");
+  }, []);
+
   const load = async () => {
     const res = await fetch("/api/templates", { cache: "no-store" });
     if (!res.ok) return;
-    const data = (await res.json()) as { templates: Template[] };
-    setTemplates(data.templates);
+    try {
+      const data = await readApiJson<{ templates: Template[] }>(res);
+      setTemplates(data.templates);
+    } catch {
+      // ignore list refresh errors
+    }
   };
 
   useEffect(() => {
@@ -39,21 +55,41 @@ export function Landing() {
     setStatus(null);
     setBusy(true);
     try {
-      const form = new FormData();
-      form.set("name", templateName.trim());
+      let total = 0;
       for (const song of songs) {
         if (!song.name.trim() || !song.file) {
           throw new Error("Each song needs a display name and an MP3");
         }
+        if (song.file.size > uploadLimits.maxFileBytes) {
+          throw new Error(
+            `“${song.file.name}” is too large (max ${formatBytes(uploadLimits.maxFileBytes)} per file).`,
+          );
+        }
+        total += song.file.size;
+      }
+      if (total > uploadLimits.maxRequestBytes) {
+        throw new Error(
+          `Total upload too large (max ${formatBytes(uploadLimits.maxRequestBytes)}). Use shorter clips.`,
+        );
+      }
+      if (songs.length > uploadLimits.maxSongsPerTemplate) {
+        throw new Error(
+          `At most ${uploadLimits.maxSongsPerTemplate} songs per template`,
+        );
+      }
+
+      const form = new FormData();
+      form.set("name", templateName.trim());
+      for (const song of songs) {
         form.append("songNames", song.name.trim());
-        form.append("songFiles", song.file);
+        form.append("songFiles", song.file!);
       }
       const res = await fetch("/api/templates", {
         method: "POST",
         body: form,
         headers: { "x-upload-secret": uploadSecret.trim() },
       });
-      const data = await res.json();
+      const data = await readApiJson<{ error?: string; name?: string }>(res);
       if (!res.ok) throw new Error(data.error || "Could not save template");
       setStatus(`Saved template “${data.name}”`);
       setTemplateName("");
@@ -88,7 +124,10 @@ export function Landing() {
       <section className="panel" id="templates">
         <h2>Create a quiz template</h2>
         <p className="lead">
-          Name the pack, upload MP3s, and you&apos;re ready to host anytime.
+          Name the pack, upload short MP3s (max{" "}
+          {formatBytes(uploadLimits.maxFileBytes)} each,{" "}
+          {formatBytes(uploadLimits.maxRequestBytes)} total), and you&apos;re
+          ready to host anytime.
         </p>
 
         <form className="stack" onSubmit={onCreate}>
@@ -114,8 +153,8 @@ export function Landing() {
               required
             />
             <p className="muted" style={{ margin: 0 }}>
-              Local default works here; on the published app use the secret you
-              set for RIFFRUSH_UPLOAD_SECRET.
+              On the published app, enter the upload secret you configured for
+              this app. Locally it fills in automatically.
             </p>
           </div>
 
