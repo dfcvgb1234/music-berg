@@ -4,6 +4,7 @@ import { newId } from "@/lib/ids";
 import { answersMatch, pointsForClip } from "@/lib/normalize";
 import {
   broadcastSession,
+  buildSessionState,
   getSessionByCode,
   publicState,
 } from "@/lib/quiz";
@@ -62,17 +63,25 @@ export async function POST(
     return NextResponse.json({ error: "No current song" }, { status: 400 });
   }
 
-  const already = await sql<{ id: string }>(
-    `select id from guesses
-     where session_id = $1 and participant_id = $2 and song_index = $3 and correct = true`,
+  const prior = await sql<{ id: string; correct: boolean }>(
+    `select id, correct from guesses
+     where session_id = $1 and participant_id = $2 and song_index = $3`,
     [session.id, participant.id, session.current_song_index],
   );
-  if (already[0]) {
-    return NextResponse.json({
-      correct: true,
-      alreadyCorrect: true,
-      message: "You already got this one",
-    });
+  if (prior[0]) {
+    const state = await buildPublic(code);
+    return NextResponse.json(
+      {
+        correct: prior[0].correct,
+        alreadyGuessed: true,
+        lockedOut: true,
+        message: prior[0].correct
+          ? "You already got this one"
+          : "No more guesses this round",
+        state,
+      },
+      { status: 409 },
+    );
   }
 
   const correct = answersMatch(guessText, song.display_name);
@@ -102,8 +111,16 @@ export async function POST(
   return NextResponse.json({
     correct,
     points,
-    // Only confirm the title after a correct guess for this player.
+    lockedOut: true,
     answer: correct ? song.display_name : undefined,
+    message: correct
+      ? undefined
+      : "Wrong — you're locked out for this round",
     state: state ? publicState(state) : null,
   });
+}
+
+async function buildPublic(code: string) {
+  const state = await buildSessionState(code);
+  return state ? publicState(state) : null;
 }

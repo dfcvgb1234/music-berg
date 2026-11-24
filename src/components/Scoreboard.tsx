@@ -27,13 +27,15 @@ export function Scoreboard({
               ? "score-row me"
               : p.guessedCorrect
                 ? "score-row ok"
-                : "score-row"
+                : p.lockedOut
+                  ? "score-row locked"
+                  : "score-row"
           }
         >
           <span className="rank">{i + 1}</span>
           <span className="name">
             {p.displayName}
-            {p.guessedCorrect ? " ✓" : ""}
+            {p.guessedCorrect ? " ✓" : p.lockedOut ? " ✕" : ""}
           </span>
           <span className="pts">{p.score}</span>
         </li>

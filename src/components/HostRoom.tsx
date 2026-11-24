@@ -58,13 +58,6 @@ export function HostRoom() {
 
   return (
     <main className="host-stage">
-      <div className="host-stage-bg" aria-hidden>
-        <div className="host-stage-grid" />
-        <div className="host-stage-orb host-stage-orb-a" />
-        <div className="host-stage-orb host-stage-orb-b" />
-        <div className="host-stage-orb host-stage-orb-c" />
-      </div>
-
       <header className="host-stage-top">
         <Link href="/" className="brand brand-md host-stage-brand">
           RiffRush
@@ -90,9 +83,9 @@ export function HostRoom() {
                 {state.status === "finished" ? " · finished" : ""}
               </p>
 
-              {(state.hostSongName || state.currentSongName) && (
+              {state.revealAnswer && state.currentSongName && (
                 <p className="ok-msg host-track-name">
-                  {state.hostSongName || state.currentSongName}
+                  Revealed: {state.currentSongName}
                 </p>
               )}
 

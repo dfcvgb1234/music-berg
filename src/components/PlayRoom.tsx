@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
 import { ClipPlayer } from "@/components/ClipPlayer";
 import { Scoreboard } from "@/components/Scoreboard";
+import { readApiJson } from "@/lib/readApiJson";
 import { useSessionStream } from "@/lib/useSessionStream";
 
 type StoredPlayer = {
@@ -36,6 +37,13 @@ export function PlayRoom() {
     enabled: Boolean(player),
   });
 
+  // Clear round feedback when the host advances songs.
+  useEffect(() => {
+    setFeedback(null);
+    setError(null);
+    setGuess("");
+  }, [state?.currentSongIndex]);
+
   const onGuess = async (e: FormEvent) => {
     e.preventDefault();
     if (!player) return;
@@ -51,18 +59,31 @@ export function PlayRoom() {
         },
         body: JSON.stringify({ guess }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Guess failed");
+      const data = await readApiJson<{
+        error?: string;
+        correct?: boolean;
+        points?: number;
+        alreadyGuessed?: boolean;
+        lockedOut?: boolean;
+        message?: string;
+        state?: NonNullable<typeof state>;
+      }>(res);
       if (data.state) setState(data.state);
+      if (!res.ok && !data.alreadyGuessed) {
+        throw new Error(data.error || data.message || "Guess failed");
+      }
       if (data.correct) {
         setFeedback(
-          data.alreadyCorrect
+          data.alreadyGuessed
             ? "Already locked in."
-            : `Correct! +${data.points} pts`,
+            : `Correct! +${data.points ?? 0} pts`,
         );
         setGuess("");
       } else {
-        setFeedback("Not quite — keep listening.");
+        setFeedback(
+          data.message || "Wrong — you're locked out for this round",
+        );
+        setGuess("");
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed");
@@ -84,7 +105,10 @@ export function PlayRoom() {
 
   const me = state?.participants.find((p) => p.id === player.participantId);
   const canGuess =
-    state?.status === "playing" && me && !me.guessedCorrect;
+    state?.status === "playing" &&
+    me &&
+    !me.guessedCorrect &&
+    !me.lockedOut;
 
   return (
     <main className="shell">
@@ -154,12 +178,22 @@ export function PlayRoom() {
                   aria-label="Guess the song"
                   autoComplete="off"
                 />
-                <button className="btn" type="submit" disabled={busy || !guess.trim()}>
+                <button
+                  className="btn"
+                  type="submit"
+                  disabled={busy || !guess.trim()}
+                >
                   Guess
                 </button>
               </form>
             ) : me?.guessedCorrect ? (
-              <p className="ok-msg">You got it — hang tight for the next track.</p>
+              <p className="ok-msg">
+                You got it — hang tight for the next track.
+              </p>
+            ) : me?.lockedOut ? (
+              <p className="error">
+                Locked out this round — wait for the next song.
+              </p>
             ) : (
               <p className="muted">
                 {state?.status === "finished"
@@ -168,7 +202,11 @@ export function PlayRoom() {
               </p>
             )}
 
-            {feedback && <p className="ok-msg">{feedback}</p>}
+            {feedback && (
+              <p className={feedback.startsWith("Wrong") || feedback.startsWith("No more") ? "error" : "ok-msg"}>
+                {feedback}
+              </p>
+            )}
             {error && <p className="error">{error}</p>}
           </div>
         </section>

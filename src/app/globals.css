@@ -318,6 +318,21 @@ textarea {
   background: rgba(125, 255, 179, 0.1);
 }
 
+.score-row.locked {
+  background: rgba(255, 107, 74, 0.1);
+  opacity: 0.85;
+}
+
+.app-foreground {
+  position: relative;
+  z-index: 1;
+  min-height: 100svh;
+}
+
+.app-stage-bg {
+  /* Shared full-app animated stage background (from host). */
+}
+
 .score-row.me {
   outline: 1px solid rgba(200, 245, 96, 0.45);
 }

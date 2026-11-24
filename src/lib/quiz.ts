@@ -6,6 +6,8 @@ export type ParticipantView = {
   displayName: string;
   score: number;
   guessedCorrect: boolean;
+  /** True after any guess this round (correct or wrong) — no more attempts. */
+  lockedOut: boolean;
 };
 
 export type SongMeta = {
@@ -96,14 +98,17 @@ export async function buildSessionState(
   const songIndex = session.current_song_index;
   const currentSong = songs[songIndex] ?? null;
 
-  const correctGuesses = currentSong
-    ? await sql<{ participant_id: string }>(
-        `select participant_id from guesses
-         where session_id = $1 and song_index = $2 and correct = true`,
+  const roundGuesses = currentSong
+    ? await sql<{ participant_id: string; correct: boolean }>(
+        `select participant_id, correct from guesses
+         where session_id = $1 and song_index = $2`,
         [session.id, songIndex],
       )
     : [];
-  const correctSet = new Set(correctGuesses.map((g) => g.participant_id));
+  const correctSet = new Set(
+    roundGuesses.filter((g) => g.correct).map((g) => g.participant_id),
+  );
+  const lockedSet = new Set(roundGuesses.map((g) => g.participant_id));
 
   const reveal =
     opts.revealAnswer === true ||
@@ -115,6 +120,7 @@ export async function buildSessionState(
     displayName: p.display_name,
     score: p.score,
     guessedCorrect: correctSet.has(p.id),
+    lockedOut: lockedSet.has(p.id),
   }));
 
   const everyoneCorrect =
@@ -134,8 +140,9 @@ export async function buildSessionState(
       ? new Date(session.play_started_at).toISOString()
       : null,
     currentSongId: currentSong?.id ?? null,
+    // Only after host reveal / finish — never leak the answer on the big screen mid-round.
     currentSongName: reveal && currentSong ? currentSong.display_name : null,
-    hostSongName: currentSong?.display_name ?? null,
+    hostSongName: null,
     revealAnswer: reveal,
     participants: participantViews,
     everyoneCorrect,
