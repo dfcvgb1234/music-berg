@@ -16,6 +16,7 @@ type SongDraft = { key: string; name: string; file: File | null };
 export function Landing() {
   const [templates, setTemplates] = useState<Template[]>([]);
   const [templateName, setTemplateName] = useState("");
+  const [uploadSecret, setUploadSecret] = useState("local-dev-upload");
   const [songs, setSongs] = useState<SongDraft[]>([
     { key: "1", name: "", file: null },
   ]);
@@ -49,7 +50,11 @@ export function Landing() {
         form.append("songNames", song.name.trim());
         form.append("songFiles", song.file);
       }
-      const res = await fetch("/api/templates", { method: "POST", body: form });
+      const res = await fetch("/api/templates", {
+        method: "POST",
+        body: form,
+        headers: { "x-upload-secret": uploadSecret.trim() },
+      });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Could not save template");
       setStatus(`Saved template “${data.name}”`);
@@ -98,6 +103,22 @@ export function Landing() {
               placeholder="90s indie warm-up"
               required
             />
+          </div>
+          <div className="field">
+            <label htmlFor="upload-secret">Upload secret</label>
+            <input
+              id="upload-secret"
+              type="password"
+              autoComplete="off"
+              value={uploadSecret}
+              onChange={(e) => setUploadSecret(e.target.value)}
+              placeholder="Required to create templates"
+              required
+            />
+            <p className="muted" style={{ margin: 0 }}>
+              Local default works here; on the published app use the secret you
+              set for RIFFRUSH_UPLOAD_SECRET.
+            </p>
           </div>
 
           <div className="song-rows">

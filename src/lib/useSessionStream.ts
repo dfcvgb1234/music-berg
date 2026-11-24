@@ -20,45 +20,69 @@ export function useSessionStream(
     if (!enabled || !code) return;
 
     let closed = false;
-    let source: EventSource | null = null;
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
+    const abort = new AbortController();
 
-    const connect = () => {
-      const qs = hostToken
-        ? `?hostToken=${encodeURIComponent(hostToken)}`
-        : "";
-      const url = `/api/sessions/${encodeURIComponent(code)}/events${qs}`;
-      source = new EventSource(url);
+    const connect = async () => {
+      try {
+        const headers: HeadersInit = {
+          Accept: "text/event-stream",
+        };
+        if (hostToken) headers["x-host-token"] = hostToken;
 
-      source.onopen = () => {
+        const res = await fetch(
+          `/api/sessions/${encodeURIComponent(code)}/events`,
+          {
+            headers,
+            cache: "no-store",
+            signal: abort.signal,
+          },
+        );
+        if (!res.ok || !res.body) {
+          throw new Error("SSE failed");
+        }
         if (!closed) setConnected(true);
-      };
 
-      source.onmessage = (event) => {
-        try {
-          const payload = JSON.parse(event.data) as {
-            type: string;
-            state?: SessionState;
-          };
-          if (payload.type === "state" && payload.state) {
-            setState(payload.state);
-            setError(null);
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (!closed) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const chunks = buffer.split("\n\n");
+          buffer = chunks.pop() ?? "";
+          for (const chunk of chunks) {
+            const lines = chunk.split("\n");
+            for (const line of lines) {
+              if (!line.startsWith("data: ")) continue;
+              try {
+                const payload = JSON.parse(line.slice(6)) as {
+                  type: string;
+                  state?: SessionState;
+                };
+                if (payload.type === "state" && payload.state) {
+                  setState(payload.state);
+                  setError(null);
+                }
+              } catch {
+                // ignore malformed
+              }
+            }
           }
-        } catch {
-          // ignore malformed
         }
-      };
-
-      source.onerror = () => {
-        setConnected(false);
-        source?.close();
+      } catch {
         if (!closed) {
-          retryTimer = setTimeout(connect, 1500);
+          setConnected(false);
+          retryTimer = setTimeout(() => {
+            void connect();
+          }, 1500);
         }
-      };
+      }
     };
 
-    connect();
+    void connect();
 
     const refresh = async () => {
       try {
@@ -80,7 +104,7 @@ export function useSessionStream(
 
     return () => {
       closed = true;
-      source?.close();
+      abort.abort();
       if (retryTimer) clearTimeout(retryTimer);
       clearInterval(poll);
     };

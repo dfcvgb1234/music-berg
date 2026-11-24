@@ -22,5 +22,6 @@ Without `DATABASE_URL`, the app uses in-memory PGlite and applies `migrations/` 
 ## Notes
 
 - MP3s are stored in the database so they work locally and when published.
+- Creating templates requires `RIFFRUSH_UPLOAD_SECRET` (header `x-upload-secret`). Locally, `local-dev-upload` works when `DATABASE_URL` is unset.
 - Browsers may block autoplay until the player taps **Tap to enable sound**.
-- Realtime sync uses Server-Sent Events; session state is persisted so a refresh can resume a live quiz.
+- Realtime sync uses Server-Sent Events (fetch + header auth for hosts); session state is persisted so a refresh can resume a live quiz.

@@ -14,9 +14,8 @@ export async function GET(
     return new Response("Not found", { status: 404 });
   }
 
-  const url = new URL(request.url);
-  const hostToken =
-    request.headers.get("x-host-token") ?? url.searchParams.get("hostToken") ?? "";
+  // Host token only via header — never query string (access logs).
+  const hostToken = request.headers.get("x-host-token") ?? "";
   const isHost = Boolean(hostToken && hostToken === session.host_token);
 
   const encoder = new TextEncoder();
