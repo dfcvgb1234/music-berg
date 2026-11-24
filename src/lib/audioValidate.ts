@@ -14,7 +14,11 @@ export function isMp3Buffer(buf: Buffer): boolean {
 }
 
 export function assertUploadAuthorized(request: Request): Response | null {
-  const expected = process.env.RIFFRUSH_UPLOAD_SECRET?.trim() ?? "";
+  // Prefer Bergs Music name; keep RIFFRUSH_* for existing hosted secrets.
+  const expected =
+    process.env.BERGS_MUSIC_UPLOAD_SECRET?.trim() ||
+    process.env.RIFFRUSH_UPLOAD_SECRET?.trim() ||
+    "";
   const provided = request.headers.get("x-upload-secret")?.trim() ?? "";
 
   if (expected) {

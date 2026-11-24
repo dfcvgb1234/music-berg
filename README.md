@@ -5,10 +5,16 @@ Realtime music quiz: short clips, longer extends, race the room to name the trac
 ## Flow
 
 1. **Frontpage** — Participate or Start new quiz.
-2. **Host** — Pick a track list (or create a new one) → get a 6-digit room code → Play (1s) / Extend (+2s) / Reveal / Next.
-3. **Participants** — Join with code + display name → hear the clipped audio → pick the track from search results.
+2. **Host** — Pick a track list (or create a new one) → get a 6-digit room code → Play (1s) / Extend (+2s) / Reveal / Next. **Audio plays only on the host.**
+3. **Participants** — Join with code + display name → listen on the host speakers → pick the track from search results (remasters/soundtrack cuts are deduped; equivalent variants still count as correct).
 
 ## Notes
 
 - App upload caps: **6 MB per MP3**, **48 MB total** per track list (up to 8 songs).
-- Creating track lists requires `RIFFRUSH_UPLOAD_SECRET` (header `x-upload-secret`). Locally, `local-dev-upload` works when `DATABASE_URL` is unset.
+- Creating track lists requires `BERGS_MUSIC_UPLOAD_SECRET` or legacy `RIFFRUSH_UPLOAD_SECRET` (header `x-upload-secret`). Locally, uploads work without a secret when `DATABASE_URL` is unset.
+- Authors can add **multiple accepted answers** per track; guesses also match by normalized artist+title fingerprint.
+- Session audio is **host-token only** — participants never receive clips or full tracks.
+
+## Deploy on Vercel
+
+See [docs/vercel.md](docs/vercel.md). You need `DATABASE_URL` (Postgres) and an upload secret on Production.
