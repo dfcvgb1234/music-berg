@@ -37,11 +37,8 @@ export async function clipMp3(
         if (code === 0 && chunks.length) {
           resolve(Buffer.concat(chunks));
         } else {
-          reject(
-            new Error(
-              errChunks.toString("utf8") || `ffmpeg exited ${code ?? "?"}`,
-            ),
-          );
+          const errText = Buffer.concat(errChunks).toString("utf8");
+          reject(new Error(errText || `ffmpeg exited ${code ?? "?"}`));
         }
       });
       ff.stdin.write(input);

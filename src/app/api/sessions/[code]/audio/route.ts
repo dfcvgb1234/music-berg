@@ -58,12 +58,13 @@ export async function GET(
       ? full
       : await clipMp3(full, seconds);
 
-  return new NextResponse(body, {
+  const bytes = new Uint8Array(body);
+  return new NextResponse(bytes, {
     headers: {
       "Content-Type": "audio/mpeg",
       "X-Content-Type-Options": "nosniff",
       "Content-Disposition": 'inline; filename="clip.mp3"',
-      "Content-Length": String(body.length),
+      "Content-Length": String(bytes.byteLength),
       "Cache-Control": "no-store",
       "Content-Security-Policy": "default-src 'none'; sandbox",
     },
