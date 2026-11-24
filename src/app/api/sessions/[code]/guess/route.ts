@@ -8,6 +8,7 @@ import {
   getSessionByCode,
   publicState,
 } from "@/lib/quiz";
+import { clientKey, rateLimit } from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
 
@@ -16,6 +17,11 @@ export async function POST(
   context: { params: Promise<{ code: string }> },
 ) {
   const { code } = await context.params;
+  const ip = clientKey(request);
+  if (!rateLimit(`guess:${ip}`, { limit: 60, windowMs: 60_000 })) {
+    return NextResponse.json({ error: "Too many guesses" }, { status: 429 });
+  }
+
   const session = await getSessionByCode(code);
   if (!session) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -77,35 +83,18 @@ export async function POST(
     );
   }
 
-  const prior = await sql<{ id: string; correct: boolean }>(
-    `select id, correct from guesses
-     where session_id = $1 and participant_id = $2 and song_index = $3`,
-    [session.id, participant.id, session.current_song_index],
-  );
-  if (prior[0]) {
-    const state = await buildPublic(code);
-    return NextResponse.json(
-      {
-        correct: prior[0].correct,
-        alreadyGuessed: true,
-        lockedOut: true,
-        message: prior[0].correct
-          ? "You already got this one"
-          : "No more guesses this round",
-        state,
-      },
-      { status: 409 },
-    );
-  }
-
   const correct = itunesTrackId === song.itunes_track_id;
   const points = correct ? pointsForClip(session.clip_ms) : 0;
+  const guessId = newId();
 
-  await sql(
+  // Unique index enforces one guess per round; concurrent inserts lose the race.
+  const inserted = await sql<{ id: string; correct: boolean }>(
     `insert into guesses (id, session_id, participant_id, song_index, guess_text, correct)
-     values ($1, $2, $3, $4, $5, $6)`,
+     values ($1, $2, $3, $4, $5, $6)
+     on conflict (session_id, participant_id, song_index) do nothing
+     returning id, correct`,
     [
-      newId(),
+      guessId,
       session.id,
       participant.id,
       session.current_song_index,
@@ -113,6 +102,27 @@ export async function POST(
       correct,
     ],
   );
+
+  if (!inserted[0]) {
+    const prior = await sql<{ id: string; correct: boolean }>(
+      `select id, correct from guesses
+       where session_id = $1 and participant_id = $2 and song_index = $3`,
+      [session.id, participant.id, session.current_song_index],
+    );
+    const state = await buildPublic(code);
+    return NextResponse.json(
+      {
+        correct: prior[0]?.correct ?? false,
+        alreadyGuessed: true,
+        lockedOut: true,
+        message: prior[0]?.correct
+          ? "You already got this one"
+          : "No more guesses this round",
+        state,
+      },
+      { status: 409 },
+    );
+  }
 
   if (correct && points > 0) {
     await sql(`update participants set score = score + $1 where id = $2`, [

@@ -94,7 +94,11 @@ export function HostRoom() {
                 songId={state.currentSongId}
                 clipMs={state.clipMs}
                 playToken={state.playToken}
-                active={state.status === "playing"}
+                active={
+                  state.status === "playing" || state.status === "revealed"
+                }
+                revealed={state.status === "revealed"}
+                coverArtUrl={state.currentCoverArtUrl}
                 hostToken={hostToken}
                 busy={busy}
                 onPlay={() => action("play")}

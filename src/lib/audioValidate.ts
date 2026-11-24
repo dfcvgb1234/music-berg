@@ -15,17 +15,23 @@ export function isMp3Buffer(buf: Buffer): boolean {
 
 export function assertUploadAuthorized(request: Request): Response | null {
   const expected = process.env.RIFFRUSH_UPLOAD_SECRET?.trim() ?? "";
-  const isPublished = Boolean(process.env.DATABASE_URL?.trim());
-  const secret = expected || (isPublished ? "" : "local-dev-upload");
-  if (!secret) {
+  const provided = request.headers.get("x-upload-secret")?.trim() ?? "";
+
+  if (expected) {
+    if (!provided || provided !== expected) {
+      return Response.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    return null;
+  }
+
+  // Hosted apps always have DATABASE_URL — require a configured secret there.
+  if (process.env.DATABASE_URL?.trim()) {
     return Response.json(
       { error: "Upload secret not configured" },
       { status: 503 },
     );
   }
-  const provided = request.headers.get("x-upload-secret")?.trim() ?? "";
-  if (!provided || provided !== secret) {
-    return Response.json({ error: "Unauthorized" }, { status: 401 });
-  }
+
+  // Local / PGlite (no DATABASE_URL): allow without a shared secret.
   return null;
 }

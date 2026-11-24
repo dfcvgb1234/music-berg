@@ -164,12 +164,28 @@ export function PlayRoom() {
               songId={state?.currentSongId ?? null}
               clipMs={state?.clipMs ?? 1000}
               playToken={state?.playToken ?? 0}
-              active={state?.status === "playing"}
+              active={
+                state?.status === "playing" || state?.status === "revealed"
+              }
+              fullTrack={state?.status === "revealed"}
               participantToken={player.token}
             />
 
             {state?.currentSongName && (
-              <p className="ok-msg">It was: {state.currentSongName}</p>
+              <div className="reveal-card">
+                {state.currentCoverArtUrl && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={state.currentCoverArtUrl}
+                    alt=""
+                    className="reveal-card-cover"
+                    referrerPolicy="no-referrer"
+                  />
+                )}
+                <p className="ok-msg" style={{ margin: 0 }}>
+                  It was: {state.currentSongName}
+                </p>
+              </div>
             )}
 
             {canGuess ? (

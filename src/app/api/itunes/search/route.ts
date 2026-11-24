@@ -6,8 +6,11 @@ export const runtime = "nodejs";
 
 export async function GET(request: Request) {
   const ip = clientKey(request);
-  if (!rateLimit(`itunes-search:${ip}`, { limit: 40, windowMs: 60_000 })) {
+  if (!rateLimit(`itunes-search:${ip}`, { limit: 30, windowMs: 60_000 })) {
     return NextResponse.json({ error: "Too many searches" }, { status: 429 });
+  }
+  if (!rateLimit(`itunes-search-global`, { limit: 90, windowMs: 60_000 })) {
+    return NextResponse.json({ error: "Search busy" }, { status: 503 });
   }
 
   const params = new URL(request.url).searchParams;

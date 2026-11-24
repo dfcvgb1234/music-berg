@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useState } from "react";
 import { TrackPicker, type PickedTrack } from "@/components/TrackPicker";
 import { readApiJson } from "@/lib/readApiJson";
 import { formatBytes, uploadLimits } from "@/lib/uploadLimits";
@@ -10,12 +10,6 @@ type SongDraft = {
   pick: PickedTrack | null;
   file: File | null;
 };
-
-function isLocalHost(): boolean {
-  if (typeof window === "undefined") return true;
-  const h = window.location.hostname;
-  return h === "localhost" || h === "127.0.0.1";
-}
 
 export function CreateTrackListForm({
   onCreated,
@@ -32,10 +26,6 @@ export function CreateTrackListForm({
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    if (isLocalHost()) setUploadSecret("local-dev-upload");
-  }, []);
 
   const onCreate = async (e: FormEvent) => {
     e.preventDefault();
@@ -72,10 +62,13 @@ export function CreateTrackListForm({
         form.append("itunesTrackIds", song.pick!.itunesTrackId);
         form.append("songFiles", song.file!);
       }
+      const headers: HeadersInit = {};
+      const secret = uploadSecret.trim();
+      if (secret) headers["x-upload-secret"] = secret;
       const res = await fetch("/api/templates", {
         method: "POST",
         body: form,
-        headers: { "x-upload-secret": uploadSecret.trim() },
+        headers,
       });
       const data = await readApiJson<{
         error?: string;
@@ -114,19 +107,18 @@ export function CreateTrackListForm({
         />
       </div>
       <div className="field">
-        <label htmlFor="upload-secret">Upload secret</label>
+            <label htmlFor="upload-secret">Upload secret</label>
         <input
           id="upload-secret"
           type="password"
           autoComplete="off"
           value={uploadSecret}
           onChange={(e) => setUploadSecret(e.target.value)}
-          placeholder="Required to create track lists"
-          required
+          placeholder="Required on the published app"
         />
         <p className="muted" style={{ margin: 0 }}>
-          On the published app, enter the upload secret you configured. Locally
-          it fills in automatically.
+          Enter the upload secret configured for this app. Leave blank only for
+          local development.
         </p>
       </div>
 

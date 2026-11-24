@@ -29,6 +29,8 @@ export type SessionState = {
   currentSongId: string | null;
   /** Public answer when revealed; otherwise null for participants */
   currentSongName: string | null;
+  /** Cover art URL when revealed; otherwise null */
+  currentCoverArtUrl: string | null;
   /** Always set for host clients; stripped in publicState */
   hostSongName: string | null;
   revealAnswer: boolean;
@@ -53,6 +55,7 @@ type SongRow = {
   id: string;
   display_name: string;
   sort_order: number;
+  cover_art_url: string | null;
 };
 
 type ParticipantRow = {
@@ -82,7 +85,7 @@ export async function buildSessionState(
   if (!session) return null;
 
   const songs = await sql<SongRow>(
-    `select id, display_name, sort_order
+    `select id, display_name, sort_order, cover_art_url
      from songs where template_id = $1
      order by sort_order asc, created_at asc`,
     [session.template_id],
@@ -142,6 +145,8 @@ export async function buildSessionState(
     currentSongId: currentSong?.id ?? null,
     // Only after host reveal / finish — never leak the answer on the big screen mid-round.
     currentSongName: reveal && currentSong ? currentSong.display_name : null,
+    currentCoverArtUrl:
+      reveal && currentSong ? currentSong.cover_art_url : null,
     hostSongName: null,
     revealAnswer: reveal,
     participants: participantViews,
@@ -163,5 +168,6 @@ export function publicState(state: SessionState): SessionState {
     ...state,
     hostSongName: null,
     currentSongName: state.revealAnswer ? state.currentSongName : null,
+    currentCoverArtUrl: state.revealAnswer ? state.currentCoverArtUrl : null,
   };
 }

@@ -2,14 +2,32 @@ import { NextResponse } from "next/server";
 import { sql } from "@/lib/db";
 import { newId, newSessionCode, newToken } from "@/lib/ids";
 import { broadcastSession } from "@/lib/quiz";
+import { clientKey, rateLimit } from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
 
+const MAX_SESSIONS = 200;
+
 export async function POST(request: Request) {
+  const ip = clientKey(request);
+  if (!rateLimit(`sessions-create:${ip}`, { limit: 10, windowMs: 60_000 })) {
+    return NextResponse.json({ error: "Too many rooms" }, { status: 429 });
+  }
+
   const body = await request.json().catch(() => null);
   const templateId = String(body?.templateId ?? "").trim();
   if (!templateId) {
     return NextResponse.json({ error: "Pick a track list" }, { status: 400 });
+  }
+
+  const sessionCount = await sql<{ count: string }>(
+    `select count(*)::text as count from sessions where status <> 'finished'`,
+  );
+  if (Number(sessionCount[0]?.count ?? 0) >= MAX_SESSIONS) {
+    return NextResponse.json(
+      { error: "Too many active rooms — try again later" },
+      { status: 503 },
+    );
   }
 
   const templates = await sql<{ id: string; name: string }>(

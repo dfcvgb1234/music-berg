@@ -8,6 +8,7 @@ export function ClipPlayer({
   clipMs,
   playToken,
   active,
+  fullTrack = false,
   hostToken,
   participantToken,
 }: {
@@ -16,6 +17,7 @@ export function ClipPlayer({
   clipMs: number;
   playToken: number;
   active: boolean;
+  fullTrack?: boolean;
   hostToken?: string | null;
   participantToken?: string | null;
 }) {
@@ -23,6 +25,7 @@ export function ClipPlayer({
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
   const [needsGesture, setNeedsGesture] = useState(false);
   const pendingRef = useRef<{ clipMs: number; playToken: number } | null>(null);
+  const stopTimerRef = useRef<number | undefined>(undefined);
 
   useEffect(() => {
     if (!songId || !active || playToken <= 0) {
@@ -58,19 +61,22 @@ export function ClipPlayer({
       cancelled = true;
       if (created) URL.revokeObjectURL(created);
     };
-  }, [code, songId, clipMs, playToken, active, hostToken, participantToken]);
+  }, [code, songId, clipMs, playToken, active, hostToken, participantToken, fullTrack]);
 
   const runClip = async (clip: number) => {
     const audio = audioRef.current;
     if (!audio || !objectUrl) return;
     try {
+      if (stopTimerRef.current) window.clearTimeout(stopTimerRef.current);
       audio.pause();
       audio.currentTime = 0;
       await audio.play();
       setNeedsGesture(false);
-      window.setTimeout(() => {
-        if (audioRef.current === audio) audio.pause();
-      }, Math.max(200, clip));
+      if (!fullTrack) {
+        stopTimerRef.current = window.setTimeout(() => {
+          if (audioRef.current === audio) audio.pause();
+        }, Math.max(200, clip));
+      }
     } catch {
       setNeedsGesture(true);
       pendingRef.current = { clipMs: clip, playToken };
@@ -80,8 +86,11 @@ export function ClipPlayer({
   useEffect(() => {
     if (!objectUrl || !active || playToken <= 0) return;
     void runClip(clipMs);
+    return () => {
+      if (stopTimerRef.current) window.clearTimeout(stopTimerRef.current);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [objectUrl, clipMs, playToken, active]);
+  }, [objectUrl, clipMs, playToken, active, fullTrack]);
 
   if (!songId || !active) return null;
 

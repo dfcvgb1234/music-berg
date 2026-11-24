@@ -17,10 +17,22 @@ export function rateLimit(
   return true;
 }
 
+/**
+ * Prefer platform-set client IP. Never trust the first X-Forwarded-For hop
+ * (clients can spoof it); use the rightmost hop the edge typically appends.
+ */
 export function clientKey(request: Request): string {
-  return (
-    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-    request.headers.get("x-real-ip") ||
-    "unknown"
-  );
+  const realIp = request.headers.get("x-real-ip")?.trim();
+  if (realIp) return realIp;
+
+  const forwarded = request.headers.get("x-forwarded-for");
+  if (forwarded) {
+    const parts = forwarded
+      .split(",")
+      .map((p) => p.trim())
+      .filter(Boolean);
+    if (parts.length > 0) return parts[parts.length - 1];
+  }
+
+  return "unknown";
 }

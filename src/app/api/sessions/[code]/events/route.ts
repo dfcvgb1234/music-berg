@@ -1,5 +1,6 @@
 import { getSessionByCode, buildSessionState, publicState } from "@/lib/quiz";
 import { subscribe } from "@/lib/pubsub";
+import { clientKey, rateLimit } from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -9,6 +10,11 @@ export async function GET(
   context: { params: Promise<{ code: string }> },
 ) {
   const { code } = await context.params;
+  const ip = clientKey(request);
+  if (!rateLimit(`sse:${ip}`, { limit: 30, windowMs: 60_000 })) {
+    return new Response("Too many streams", { status: 429 });
+  }
+
   const session = await getSessionByCode(code);
   if (!session) {
     return new Response("Not found", { status: 404 });

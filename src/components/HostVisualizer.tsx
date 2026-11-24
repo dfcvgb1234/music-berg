@@ -11,6 +11,8 @@ export function HostVisualizer({
   clipMs,
   playToken,
   active,
+  revealed,
+  coverArtUrl,
   hostToken,
   onPlay,
   busy,
@@ -20,6 +22,8 @@ export function HostVisualizer({
   clipMs: number;
   playToken: number;
   active: boolean;
+  revealed: boolean;
+  coverArtUrl: string | null;
   hostToken: string;
   onPlay: () => void;
   busy: boolean;
@@ -37,7 +41,18 @@ export function HostVisualizer({
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
   const [playing, setPlaying] = useState(false);
   const [positionMs, setPositionMs] = useState(0);
+  const [durationMs, setDurationMs] = useState(0);
   const [needsGesture, setNeedsGesture] = useState(false);
+  const [coverIn, setCoverIn] = useState(false);
+
+  useEffect(() => {
+    if (revealed && coverArtUrl) {
+      setCoverIn(false);
+      const t = requestAnimationFrame(() => setCoverIn(true));
+      return () => cancelAnimationFrame(t);
+    }
+    setCoverIn(false);
+  }, [revealed, coverArtUrl, playToken]);
 
   useEffect(() => {
     if (!songId || !active || playToken <= 0) {
@@ -67,7 +82,7 @@ export function HostVisualizer({
       cancelled = true;
       if (created) URL.revokeObjectURL(created);
     };
-  }, [code, songId, clipMs, playToken, active, hostToken]);
+  }, [code, songId, clipMs, playToken, active, hostToken, revealed]);
 
   const ensureGraph = () => {
     const audio = audioRef.current;
@@ -138,7 +153,9 @@ export function HostVisualizer({
 
     g.beginPath();
     g.arc(cx, cy, innerR, 0, Math.PI * 2);
-    g.fillStyle = "rgba(7, 20, 26, 0.72)";
+    g.fillStyle = revealed
+      ? "rgba(7, 20, 26, 0.35)"
+      : "rgba(7, 20, 26, 0.72)";
     g.fill();
     g.strokeStyle = "rgba(200, 245, 96, 0.35)";
     g.lineWidth = 2;
@@ -150,19 +167,25 @@ export function HostVisualizer({
       draw();
       const audio = audioRef.current;
       if (audio && !audio.paused) {
-        setPositionMs(Math.min(clipMs, audio.currentTime * 1000));
+        const cap = revealed
+          ? (Number.isFinite(audio.duration) ? audio.duration * 1000 : positionMs)
+          : clipMs;
+        setPositionMs(Math.min(cap || clipMs, audio.currentTime * 1000));
+        if (Number.isFinite(audio.duration) && audio.duration > 0) {
+          setDurationMs(audio.duration * 1000);
+        }
       }
       rafRef.current = requestAnimationFrame(tick);
     };
     rafRef.current = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playing, clipMs]);
+  }, [playing, clipMs, revealed]);
 
   const runUnlocked = async () => {
     const audio = audioRef.current;
     if (!audio || !objectUrl) {
-      onPlay();
+      if (!revealed) onPlay();
       return;
     }
     try {
@@ -175,11 +198,15 @@ export function HostVisualizer({
       await audio.play();
       setPlaying(true);
       setNeedsGesture(false);
-      stopTimerRef.current = setTimeout(() => {
-        audio.pause();
-        setPlaying(false);
-        setPositionMs(clipMs);
-      }, Math.max(200, clipMs));
+      if (!revealed) {
+        stopTimerRef.current = setTimeout(() => {
+          audio.pause();
+          setPlaying(false);
+          setPositionMs(clipMs);
+        }, Math.max(200, clipMs));
+      } else {
+        audio.onended = () => setPlaying(false);
+      }
     } catch {
       setNeedsGesture(true);
     }
@@ -194,28 +221,48 @@ export function HostVisualizer({
       setPlaying(false);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [objectUrl, playToken, clipMs, active]);
+  }, [objectUrl, playToken, clipMs, active, revealed]);
 
-  const unlockedPct = Math.min(100, (clipMs / TIMELINE_MAX_MS) * 100);
-  const posPct = Math.min(unlockedPct, (positionMs / TIMELINE_MAX_MS) * 100);
-  const unlockedLabel = `${(clipMs / 1000).toFixed(clipMs % 1000 === 0 ? 0 : 1)}s unlocked`;
+  const timelineMax = revealed
+    ? Math.max(durationMs || clipMs, clipMs, 1000)
+    : TIMELINE_MAX_MS;
+  const unlockedPct = revealed
+    ? 100
+    : Math.min(100, (clipMs / TIMELINE_MAX_MS) * 100);
+  const posPct = Math.min(
+    unlockedPct,
+    (positionMs / timelineMax) * 100,
+  );
+  const unlockedLabel = revealed
+    ? "Full track"
+    : `${(clipMs / 1000).toFixed(clipMs % 1000 === 0 ? 0 : 1)}s unlocked`;
 
   return (
     <div className="host-deck">
       <div className="host-viz-wrap">
         <canvas ref={canvasRef} className="host-viz-canvas" aria-hidden />
-        <button
-          type="button"
-          className="host-play-btn"
-          disabled={busy || !songId}
-          onClick={() => {
-            if (active && objectUrl) void runUnlocked();
-            else onPlay();
-          }}
-          aria-label={playing ? "Replay unlocked clip" : "Play unlocked clip"}
-        >
-          <span className="host-play-icon" aria-hidden />
-        </button>
+        {revealed && coverArtUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={coverArtUrl}
+            alt=""
+            className={`host-reveal-cover${coverIn ? " is-in" : ""}`}
+            referrerPolicy="no-referrer"
+          />
+        ) : (
+          <button
+            type="button"
+            className="host-play-btn"
+            disabled={busy || !songId}
+            onClick={() => {
+              if (active && objectUrl) void runUnlocked();
+              else onPlay();
+            }}
+            aria-label={playing ? "Replay unlocked clip" : "Play unlocked clip"}
+          >
+            <span className="host-play-icon" aria-hidden />
+          </button>
+        )}
       </div>
 
       {objectUrl && (
@@ -236,7 +283,11 @@ export function HostVisualizer({
         <div className="host-timeline-meta">
           <span>{(positionMs / 1000).toFixed(1)}s</span>
           <span>{unlockedLabel}</span>
-          <span>30s</span>
+          <span>
+            {revealed
+              ? `${((durationMs || timelineMax) / 1000).toFixed(0)}s`
+              : "30s"}
+          </span>
         </div>
       </div>
 
