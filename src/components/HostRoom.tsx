@@ -73,7 +73,7 @@ export function HostRoom() {
           <p className="host-code-label">Join with code</p>
           <div className="code-pill host-code-xl">{code}</div>
           <p className="muted host-code-hint">
-            Players open Participate on their phone
+            Open Participate on phones with this code
           </p>
         </div>
         <span className="badge">{connected ? "Live" : "Reconnecting…"}</span>

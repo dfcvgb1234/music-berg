@@ -108,15 +108,21 @@ export function HostVisualizer({
     const data = new Uint8Array(analyser?.frequencyBinCount ?? BAR_COUNT);
     if (analyser) analyser.getByteFrequencyData(data);
 
+    const now = Date.now() / 1000;
     for (let i = 0; i < BAR_COUNT; i++) {
       const t = i / BAR_COUNT;
       const angle = t * Math.PI * 2 - Math.PI / 2;
-      const sample =
+      const measured =
         analyser && data.length
           ? data[Math.floor((i / BAR_COUNT) * data.length)] / 255
-          : 0.15 + 0.1 * Math.sin(Date.now() / 180 + i);
-      const amp = playing ? 0.18 + sample * 0.55 : 0.12 + sample * 0.08;
-      const outer = innerR + size * amp * 0.22;
+          : 0;
+      const synth =
+        0.35 +
+        0.45 * Math.abs(Math.sin(now * 6.2 + i * 0.55)) *
+          Math.abs(Math.cos(now * 3.1 + i * 0.2));
+      const sample = playing ? Math.max(measured, synth * 0.85) : 0.12 + measured * 0.1;
+      const amp = playing ? 0.22 + sample * 0.7 : 0.14 + sample * 0.12;
+      const outer = innerR + size * amp * 0.26;
       const x0 = cx + Math.cos(angle) * (innerR + 6);
       const y0 = cy + Math.sin(angle) * (innerR + 6);
       const x1 = cx + Math.cos(angle) * outer;
