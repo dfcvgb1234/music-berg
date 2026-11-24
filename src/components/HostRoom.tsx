@@ -60,7 +60,7 @@ export function HostRoom() {
     <main className="host-stage">
       <header className="host-stage-top">
         <Link href="/" className="brand brand-md host-stage-brand">
-          RiffRush
+          Bergs Music
         </Link>
         <div className="host-code-block">
           <p className="host-code-label">Join with code</p>

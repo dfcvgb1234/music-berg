@@ -117,7 +117,7 @@ export function PlayRoom() {
     <main className="shell">
       <div className="topbar">
         <Link href="/" className="brand brand-md">
-          RiffRush
+          Bergs Music
         </Link>
         <span className="badge">
           {player.displayName} · {connected ? "Live" : "…"}
@@ -179,7 +179,7 @@ export function PlayRoom() {
                   label="Your guess"
                   value={pick}
                   onChange={setPick}
-                  placeholder="Search iTunes…"
+                  placeholder="Search title or artist…"
                 />
                 <button
                   className="btn"

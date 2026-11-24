@@ -22,7 +22,7 @@ export async function GET(request: Request) {
   } catch (err) {
     return NextResponse.json(
       {
-        error: err instanceof Error ? err.message : "iTunes unavailable",
+        error: err instanceof Error ? err.message : "Search unavailable",
       },
       { status: 502 },
     );

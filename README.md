@@ -1,28 +1,14 @@
-# RiffRush
+# Bergs Music
 
-Realtime music quiz for parties. Host plays short clips that can extend by +2s; participants guess the song name while scores update live.
-
-## Run locally
-
-```bash
-npm install
-env -u DATABASE_URL npm run dev
-```
-
-Open [http://127.0.0.1:3000](http://127.0.0.1:3000).
-
-Without `DATABASE_URL`, the app uses in-memory PGlite and applies `migrations/` on startup. With `DATABASE_URL` (published app), Postgres is used and migrations run during `npm run build`.
+Realtime music quiz: short clips, longer extends, race the room to name the track.
 
 ## Flow
 
-1. **Frontpage** — Participate, Start new quiz, or create a template (name + MP3s).
-2. **Host** — Pick a template → get a 6-digit room code → Play (1s) / Extend (+2s) / Reveal / Next.
-3. **Participants** — Enter the code + name → guess in realtime → scores sync on host and players.
+1. **Frontpage** — Participate or Start new quiz.
+2. **Host** — Pick a track list (or create a new one) → get a 6-digit room code → Play (1s) / Extend (+2s) / Reveal / Next.
+3. **Participants** — Join with code + display name → hear the clipped audio → pick the track from search results.
 
 ## Notes
 
-- MP3s are stored in the database so they work locally and when published.
-- App upload caps: **6 MB per MP3**, **48 MB total** per template (up to 8 songs). There is no Cursor Apps setting we can raise for the edge proxy; if the host still returns `Request Entity Too Large` / HTTP 413, that is a platform request-size limit outside this repo.
-- Creating templates requires `RIFFRUSH_UPLOAD_SECRET` (header `x-upload-secret`). Locally, `local-dev-upload` works when `DATABASE_URL` is unset.
-- Browsers may block autoplay until the player taps **Tap to enable sound**.
-- Realtime sync uses Server-Sent Events (fetch + header auth for hosts); session state is persisted so a refresh can resume a live quiz.
+- App upload caps: **6 MB per MP3**, **48 MB total** per track list (up to 8 songs).
+- Creating track lists requires `RIFFRUSH_UPLOAD_SECRET` (header `x-upload-secret`). Locally, `local-dev-upload` works when `DATABASE_URL` is unset.

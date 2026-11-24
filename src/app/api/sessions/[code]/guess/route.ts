@@ -52,7 +52,7 @@ export async function POST(
   const guessLabel = String(body?.label ?? body?.guess ?? "").trim().slice(0, 120);
   if (!itunesTrackId || !/^\d+$/.test(itunesTrackId)) {
     return NextResponse.json(
-      { error: "Pick an iTunes track" },
+      { error: "Pick a track from the search results" },
       { status: 400 },
     );
   }
@@ -72,7 +72,7 @@ export async function POST(
   }
   if (!song.itunes_track_id) {
     return NextResponse.json(
-      { error: "This round has no iTunes track id" },
+      { error: "This round has no track id" },
       { status: 400 },
     );
   }

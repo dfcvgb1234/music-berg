@@ -17,7 +17,7 @@ export function TrackPicker({
   label,
   value,
   onChange,
-  placeholder = "Search iTunes…",
+  placeholder = "Search title or artist…",
 }: {
   id: string;
   label: string;
@@ -181,10 +181,10 @@ export function TrackPicker({
           </ul>
         )}
       </div>
-      {loading && <p className="muted">Searching iTunes…</p>}
+      {loading && <p className="muted">Searching…</p>}
       {error && <p className="error">{error}</p>}
       <p className="muted" style={{ margin: 0 }}>
-        Pick an iTunes track — free text is not allowed.
+        Pick a track from the results — free text is not allowed.
       </p>
     </div>
   );

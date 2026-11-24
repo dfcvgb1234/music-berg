@@ -40,7 +40,7 @@ export function JoinForm() {
     <main className="shell">
       <div className="topbar">
         <Link href="/" className="brand brand-md">
-          RiffRush
+          Bergs Music
         </Link>
         <Link href="/host" className="btn secondary">
           Host a quiz

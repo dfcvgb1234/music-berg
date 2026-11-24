@@ -9,7 +9,7 @@ export async function POST(request: Request) {
   const body = await request.json().catch(() => null);
   const templateId = String(body?.templateId ?? "").trim();
   if (!templateId) {
-    return NextResponse.json({ error: "Pick a template" }, { status: 400 });
+    return NextResponse.json({ error: "Pick a track list" }, { status: 400 });
   }
 
   const templates = await sql<{ id: string; name: string }>(
@@ -17,7 +17,7 @@ export async function POST(request: Request) {
     [templateId],
   );
   if (!templates[0]) {
-    return NextResponse.json({ error: "Template not found" }, { status: 404 });
+    return NextResponse.json({ error: "Track list not found" }, { status: 404 });
   }
 
   const songs = await sql<{ id: string }>(
@@ -25,7 +25,10 @@ export async function POST(request: Request) {
     [templateId],
   );
   if (songs.length === 0) {
-    return NextResponse.json({ error: "Template has no songs" }, { status: 400 });
+    return NextResponse.json(
+      { error: "Track list has no songs" },
+      { status: 400 },
+    );
   }
 
   let code = "";

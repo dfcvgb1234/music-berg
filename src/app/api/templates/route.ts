@@ -65,7 +65,7 @@ export async function POST(request: Request) {
   );
   if (Number(existing[0]?.count ?? 0) >= uploadLimits.maxTemplates) {
     return NextResponse.json(
-      { error: "Template limit reached" },
+      { error: "Track list limit reached" },
       { status: 400 },
     );
   }
@@ -73,7 +73,10 @@ export async function POST(request: Request) {
   const form = await request.formData();
   const name = String(form.get("name") ?? "").trim().slice(0, 80);
   if (!name) {
-    return NextResponse.json({ error: "Template name is required" }, { status: 400 });
+    return NextResponse.json(
+      { error: "Track list name is required" },
+      { status: 400 },
+    );
   }
 
   const itunesIds = form.getAll("itunesTrackIds").map((v) => String(v).trim());
@@ -81,20 +84,20 @@ export async function POST(request: Request) {
 
   if (itunesIds.length === 0 || files.length === 0) {
     return NextResponse.json(
-      { error: "Add at least one iTunes track + MP3" },
+      { error: "Add at least one track pick + MP3" },
       { status: 400 },
     );
   }
   if (itunesIds.length !== files.length) {
     return NextResponse.json(
-      { error: "Each song needs an iTunes pick and an MP3" },
+      { error: "Each song needs a track pick and an MP3" },
       { status: 400 },
     );
   }
   if (itunesIds.length > uploadLimits.maxSongsPerTemplate) {
     return NextResponse.json(
       {
-        error: `At most ${uploadLimits.maxSongsPerTemplate} songs per template`,
+        error: `At most ${uploadLimits.maxSongsPerTemplate} songs per track list`,
       },
       { status: 400 },
     );
@@ -115,14 +118,14 @@ export async function POST(request: Request) {
     const file = files[i];
     if (!itunesId || !/^\d+$/.test(itunesId)) {
       return NextResponse.json(
-        { error: "Each song must be picked from iTunes" },
+        { error: "Each song must be picked from search results" },
         { status: 400 },
       );
     }
     const track = await getTrack(itunesId);
     if (!track) {
       return NextResponse.json(
-        { error: "Invalid iTunes track" },
+        { error: "Invalid track selection" },
         { status: 400 },
       );
     }

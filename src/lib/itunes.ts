@@ -67,7 +67,7 @@ export async function searchSongs(
     cache: "no-store",
   });
   if (!res.ok) {
-    throw new Error(`iTunes search failed (${res.status})`);
+    throw new Error(`Search failed (${res.status})`);
   }
   const data = (await res.json()) as ItunesSearchJson;
   const hits: ItunesTrackHit[] = [];
@@ -92,7 +92,7 @@ export async function getTrack(
     headers: { Accept: "application/json" },
     cache: "no-store",
   });
-  if (!res.ok) throw new Error(`iTunes lookup failed (${res.status})`);
+  if (!res.ok) throw new Error(`Track lookup failed (${res.status})`);
   const data = (await res.json()) as ItunesSearchJson;
   for (const row of data.results ?? []) {
     const mapped = mapResult(row);

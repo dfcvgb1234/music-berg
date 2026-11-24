@@ -406,6 +406,18 @@ textarea {
   align-items: start;
 }
 
+.track-list-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: end;
+}
+
+.btn.secondary.is-active {
+  border-color: rgba(125, 255, 179, 0.55);
+  background: rgba(125, 255, 179, 0.1);
+}
+
 .track-pick {
   position: relative;
   z-index: 1;
