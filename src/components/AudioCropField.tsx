@@ -406,6 +406,7 @@ export function AudioCropField({
               startSec={visualStart}
               endSec={visualEnd}
               segmentPointsSec={visualSegments}
+              mediaRef={previewRef}
               lockCrop={ready || existingMode || encoding}
               lockSegments={encoding}
               disabled={disabled || encoding}

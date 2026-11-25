@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
   type PointerEvent as ReactPointerEvent,
+  type RefObject,
 } from "react";
 
 export type WaveformCropProps = {
@@ -22,6 +23,8 @@ export type WaveformCropProps = {
   lockCrop?: boolean;
   /** When true, segment markers cannot be added/moved. */
   lockSegments?: boolean;
+  /** Linked preview element — drives playhead + click/drag seek. */
+  mediaRef?: RefObject<HTMLAudioElement | null>;
   disabled?: boolean;
   className?: string;
 };
@@ -69,6 +72,7 @@ export function WaveformCrop({
   onSegmentPointsChange,
   lockCrop = false,
   lockSegments = false,
+  mediaRef,
   disabled = false,
   className,
 }: WaveformCropProps) {
@@ -76,19 +80,26 @@ export function WaveformCrop({
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const [peaks, setPeaks] = useState<Float32Array | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [playheadSec, setPlayheadSec] = useState(0);
+  const playheadSecRef = useRef(0);
   const dragRef = useRef<{
     kind: DragKind;
     segmentIndex: number;
   }>({ kind: null, segmentIndex: -1 });
+  const widthRef = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
     setPeaks(null);
     setLoadError(null);
     if (!file || duration <= 0) return;
+    const buckets = Math.max(
+      240,
+      Math.min(900, Math.floor((wrapRef.current?.clientWidth || 720) / 1.5)),
+    );
     void (async () => {
       try {
-        const next = await buildPeaks(file, 240);
+        const next = await buildPeaks(file, buckets);
         if (!cancelled) setPeaks(next);
       } catch (err) {
         if (!cancelled) {
@@ -103,16 +114,77 @@ export function WaveformCrop({
     };
   }, [file, duration]);
 
+  // Sync playhead from the linked <audio> element.
+  useEffect(() => {
+    const el = mediaRef?.current;
+    if (!el) return;
+
+    let raf = 0;
+    const push = (sec: number) => {
+      playheadSecRef.current = sec;
+      setPlayheadSec(sec);
+    };
+
+    const onTime = () => push(el.currentTime || 0);
+    const tick = () => {
+      push(el.currentTime || 0);
+      if (!el.paused && !el.ended) {
+        raf = requestAnimationFrame(tick);
+      }
+    };
+    const onPlay = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(tick);
+    };
+    const onPause = () => {
+      cancelAnimationFrame(raf);
+      push(el.currentTime || 0);
+    };
+
+    push(el.currentTime || 0);
+    el.addEventListener("timeupdate", onTime);
+    el.addEventListener("seeked", onTime);
+    el.addEventListener("play", onPlay);
+    el.addEventListener("playing", onPlay);
+    el.addEventListener("pause", onPause);
+    el.addEventListener("ended", onPause);
+    if (!el.paused) onPlay();
+
+    return () => {
+      cancelAnimationFrame(raf);
+      el.removeEventListener("timeupdate", onTime);
+      el.removeEventListener("seeked", onTime);
+      el.removeEventListener("play", onPlay);
+      el.removeEventListener("playing", onPlay);
+      el.removeEventListener("pause", onPause);
+      el.removeEventListener("ended", onPause);
+    };
+  }, [mediaRef, file, duration]);
+
+  const seekMedia = (sec: number) => {
+    const el = mediaRef?.current;
+    if (!el || !Number.isFinite(sec)) return;
+    const next = clamp(sec, 0, duration || el.duration || 0);
+    try {
+      el.currentTime = next;
+    } catch {
+      /* ignore */
+    }
+    playheadSecRef.current = next;
+    setPlayheadSec(next);
+  };
+
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas || duration <= 0) return;
     const wrap = wrapRef.current;
-    const cssW = wrap?.clientWidth ?? 480;
-    const cssH = 96;
+    const cssW = Math.max(1, wrap?.clientWidth ?? 480);
+    const cssH = 112;
+    widthRef.current = cssW;
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     canvas.width = Math.floor(cssW * dpr);
     canvas.height = Math.floor(cssH * dpr);
-    canvas.style.width = `${cssW}px`;
+    canvas.style.width = "100%";
     canvas.style.height = `${cssH}px`;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
@@ -177,13 +249,36 @@ export function WaveformCrop({
       ctx.closePath();
       ctx.fill();
     }
-  }, [peaks, duration, startSec, endSec, segmentPointsSec]);
+
+    // Playhead
+    const ph = clamp(playheadSec, 0, duration);
+    const px = (ph / duration) * cssW;
+    ctx.strokeStyle = "rgba(232, 255, 246, 0.95)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(px, 0);
+    ctx.lineTo(px, cssH);
+    ctx.stroke();
+    ctx.fillStyle = "rgba(232, 255, 246, 0.95)";
+    ctx.beginPath();
+    ctx.arc(px, mid, 4.5, 0, Math.PI * 2);
+    ctx.fill();
+  }, [peaks, duration, startSec, endSec, segmentPointsSec, playheadSec]);
 
   useEffect(() => {
     draw();
+    const wrap = wrapRef.current;
+    const ro =
+      typeof ResizeObserver !== "undefined" && wrap
+        ? new ResizeObserver(() => draw())
+        : null;
+    ro?.observe(wrap!);
     const onResize = () => draw();
     window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
+    return () => {
+      ro?.disconnect();
+      window.removeEventListener("resize", onResize);
+    };
   }, [draw]);
 
   const secFromClientX = (clientX: number): number => {
@@ -232,19 +327,26 @@ export function WaveformCrop({
         e.currentTarget.setPointerCapture(e.pointerId);
         return;
       }
-      // Click inside crop adds a segment point
-      if (sec > startSec + 0.15 && sec < endSec - 0.15) {
-        const next = [...segmentPointsSec, sec]
-          .map((v) => Math.round(v * 10) / 10)
-          .filter((v, i, arr) => arr.indexOf(v) === i)
-          .sort((a, b) => a - b)
-          .slice(0, 40);
-        onSegmentPointsChange(next);
-        return;
-      }
     }
 
+    // Scrub playhead; Shift/Alt+click also drops a segment at that time.
     dragRef.current = { kind: "seek", segmentIndex: -1 };
+    seekMedia(sec);
+    if (
+      !lockSegments &&
+      onSegmentPointsChange &&
+      (e.shiftKey || e.altKey) &&
+      sec > startSec + 0.15 &&
+      sec < endSec - 0.15
+    ) {
+      const next = [...segmentPointsSec, sec]
+        .map((v) => Math.round(v * 10) / 10)
+        .filter((v, i, arr) => arr.indexOf(v) === i)
+        .sort((a, b) => a - b)
+        .slice(0, 40);
+      onSegmentPointsChange(next);
+    }
+    e.currentTarget.setPointerCapture(e.pointerId);
   };
 
   const onPointerMove = (e: ReactPointerEvent<HTMLCanvasElement>) => {
@@ -270,6 +372,8 @@ export function WaveformCrop({
           (a, b) => a - b,
         ),
       );
+    } else if (drag.kind === "seek") {
+      seekMedia(sec);
     }
   };
 
@@ -289,13 +393,28 @@ export function WaveformCrop({
     onSegmentPointsChange(segmentPointsSec.filter((_, i) => i !== idx));
   };
 
+  const addSegmentAtPlayhead = () => {
+    if (lockSegments || !onSegmentPointsChange || disabled) return;
+    const sec = clamp(playheadSecRef.current, startSec + 0.05, endSec - 0.05);
+    if (sec <= startSec + 0.05 || sec >= endSec - 0.05) return;
+    const next = [...segmentPointsSec, sec]
+      .map((v) => Math.round(v * 10) / 10)
+      .filter((v, i, arr) => arr.indexOf(v) === i)
+      .sort((a, b) => a - b)
+      .slice(0, 40);
+    onSegmentPointsChange(next);
+  };
+
   return (
-    <div className={`waveform-crop${className ? ` ${className}` : ""}`} ref={wrapRef}>
+    <div
+      className={`waveform-crop${className ? ` ${className}` : ""}`}
+      ref={wrapRef}
+    >
       <canvas
         ref={canvasRef}
         className="waveform-crop-canvas"
         role="img"
-        aria-label="Audio waveform with crop and segment markers"
+        aria-label="Audio waveform with crop, playhead, and segment markers"
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
@@ -307,8 +426,24 @@ export function WaveformCrop({
       />
       <div className="waveform-crop-legend muted">
         <span>Crop: lime edges</span>
-        <span>Segments: coral markers (click to add, drag to move, double-click to remove)</span>
+        <span>Playhead: foam line (click/drag to scrub while audio plays)</span>
+        <span>
+          Segments: coral — “Mark at playhead”, or Shift/Alt+click; double-click
+          removes
+        </span>
       </div>
+      {!lockSegments && onSegmentPointsChange && (
+        <div className="waveform-crop-actions">
+          <button
+            type="button"
+            className="btn secondary"
+            disabled={disabled}
+            onClick={addSegmentAtPlayhead}
+          >
+            Mark segment at playhead
+          </button>
+        </div>
+      )}
       {loadError && <p className="error">{loadError}</p>}
     </div>
   );
