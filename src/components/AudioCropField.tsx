@@ -2,8 +2,11 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import {
+  cropCacheKey,
   encodeOpusCrop,
+  isEncodeAbortError,
   probeAudioDuration,
+  resetFfmpegSingleton,
   type EncodeProgress,
 } from "@/lib/clientOpusEncode";
 import { formatBytes, uploadLimits } from "@/lib/uploadLimits";
@@ -43,6 +46,8 @@ export function AudioCropField({
   const inputId = idProp ?? `audio-crop-${uid}`;
   const previewRef = useRef<HTMLAudioElement | null>(null);
   const previewUrlRef = useRef<string | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const monoCacheRef = useRef<{ key: string; mono: AudioBuffer } | null>(null);
 
   const [source, setSource] = useState<File | null>(null);
   const [duration, setDuration] = useState(0);
@@ -55,6 +60,7 @@ export function AudioCropField({
   useEffect(() => {
     return () => {
       if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+      abortRef.current?.abort();
     };
   }, []);
 
@@ -75,7 +81,14 @@ export function AudioCropField({
     el.src = url;
   };
 
+  const invalidateMonoCache = () => {
+    monoCacheRef.current = null;
+  };
+
   const reset = () => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    invalidateMonoCache();
     setSource(null);
     setDuration(0);
     setStartSec(0);
@@ -91,7 +104,6 @@ export function AudioCropField({
     reset();
     if (!file) return;
     if (file.size > uploadLimits.maxFileBytes * 2) {
-      // Allow larger source before Opus shrink; hard cap ~2× stored limit.
       setLocalError(
         `File is too large to process (max ~${formatBytes(uploadLimits.maxFileBytes * 2)}).`,
       );
@@ -120,7 +132,7 @@ export function AudioCropField({
     if (!el || !source) return;
     el.currentTime = startSec;
     void el.play().catch(() => {
-      /* autoplay may be blocked until click — ignore */
+      /* ignore */
     });
   };
 
@@ -137,12 +149,29 @@ export function AudioCropField({
     return () => el.removeEventListener("timeupdate", onTime);
   }, [startSec, endSec]);
 
+  const onCancelEncode = () => {
+    abortRef.current?.abort();
+    resetFfmpegSingleton("UI cancel");
+    setEncoding(false);
+    setProgress(null);
+    setLocalError("Encoding cancelled — crop selection kept. Click Convert to retry.");
+    // Keep source, startSec, endSec, monoCache — do not clear the file/range.
+  };
+
   const onEncode = async () => {
     if (!source || duration <= 0) return;
     if (endSec - startSec < 0.5) {
       setLocalError("Crop must be at least 0.5 seconds");
       return;
     }
+    abortRef.current?.abort();
+    const ac = new AbortController();
+    abortRef.current = ac;
+
+    const key = cropCacheKey(source, { startSec, endSec });
+    const cached =
+      monoCacheRef.current?.key === key ? monoCacheRef.current.mono : null;
+
     setEncoding(true);
     setLocalError(null);
     setProgress({ phase: "loading", message: "Starting encoder…" });
@@ -151,7 +180,15 @@ export function AudioCropField({
         source,
         { startSec, endSec },
         setProgress,
+        {
+          signal: ac.signal,
+          cachedMono: cached,
+          onMonoReady: (mono) => {
+            monoCacheRef.current = { key, mono };
+          },
+        },
       );
+      if (ac.signal.aborted) return;
       if (file.size > uploadLimits.maxFileBytes) {
         throw new Error(
           `Encoded file is still too large (max ${formatBytes(uploadLimits.maxFileBytes)}). Use a shorter crop.`,
@@ -164,20 +201,36 @@ export function AudioCropField({
         endSec,
       });
       setPreview(file);
+      setLocalError(null);
     } catch (err) {
+      if (isEncodeAbortError(err) || ac.signal.aborted) {
+        setProgress(null);
+        setLocalError(
+          "Encoding cancelled — crop selection kept. Click Convert to retry.",
+        );
+        return;
+      }
       onChange(null);
-      setProgress(null);
       const message =
         err instanceof Error ? err.message : String(err ?? "Encoding failed");
       console.error("[bergs-music:opus]", "UI convert failed", message, err);
+      setProgress({
+        phase: "error",
+        message,
+      });
       setLocalError(message);
     } finally {
+      if (abortRef.current === ac) abortRef.current = null;
       setEncoding(false);
     }
   };
 
   const cropLen = Math.max(0, endSec - startSec);
   const ready = Boolean(value?.file);
+  const progressLabel =
+    progress?.chunkIndex && progress?.chunkTotal
+      ? `${progress.message}`
+      : progress?.message;
 
   return (
     <div className="field audio-crop-field">
@@ -200,7 +253,12 @@ export function AudioCropField({
 
       {source && duration > 0 && (
         <div className="audio-crop-panel">
-          <audio ref={previewRef} controls preload="metadata" className="audio-crop-preview" />
+          <audio
+            ref={previewRef}
+            controls
+            preload="metadata"
+            className="audio-crop-preview"
+          />
           <div className="audio-crop-sliders">
             <label>
               Start ({fmtTime(startSec)})
@@ -215,6 +273,7 @@ export function AudioCropField({
                   const next = Number(e.target.value);
                   setStartSec(next);
                   setEndSec((end) => Math.max(end, next + 0.5));
+                  invalidateMonoCache();
                   if (value) onChange(null);
                 }}
               />
@@ -230,6 +289,7 @@ export function AudioCropField({
                 disabled={encoding || ready}
                 onChange={(e) => {
                   setEndSec(Number(e.target.value));
+                  invalidateMonoCache();
                   if (value) onChange(null);
                 }}
               />
@@ -252,14 +312,25 @@ export function AudioCropField({
               Preview crop
             </button>
             {!ready ? (
-              <button
-                type="button"
-                className="btn"
-                disabled={encoding || cropLen < 0.5}
-                onClick={() => void onEncode()}
-              >
-                {encoding ? "Converting…" : "Convert to Opus"}
-              </button>
+              <>
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={encoding || cropLen < 0.5}
+                  onClick={() => void onEncode()}
+                >
+                  {encoding ? "Converting…" : "Convert to Opus"}
+                </button>
+                {encoding && (
+                  <button
+                    type="button"
+                    className="btn secondary"
+                    onClick={onCancelEncode}
+                  >
+                    Cancel
+                  </button>
+                )}
+              </>
             ) : (
               <button
                 type="button"
@@ -275,7 +346,7 @@ export function AudioCropField({
               </button>
             )}
           </div>
-          {progress && progress.phase !== "done" && (
+          {progress && progress.phase !== "done" && progress.phase !== "error" && (
             <div className="audio-crop-progress" role="status">
               <div className="audio-crop-progress-bar">
                 <span
@@ -284,7 +355,7 @@ export function AudioCropField({
                   }}
                 />
               </div>
-              <span className="muted">{progress.message}</span>
+              <span className="muted">{progressLabel}</span>
             </div>
           )}
           {progress?.phase === "done" && (
