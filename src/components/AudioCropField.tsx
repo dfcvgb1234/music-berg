@@ -245,12 +245,6 @@ export function AudioCropField({
           e.target.value = "";
         }}
       />
-      <p className="muted audio-crop-hint">
-        Pick any common audio file, optionally crop, then convert to Opus 96
-        kbps before upload (max {formatBytes(uploadLimits.maxFileBytes)}{" "}
-        encoded).
-      </p>
-
       {source && duration > 0 && (
         <div className="audio-crop-panel">
           <audio

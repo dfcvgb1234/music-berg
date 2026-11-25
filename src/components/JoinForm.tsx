@@ -49,7 +49,6 @@ export function JoinForm() {
 
       <section className="stack" style={{ maxWidth: 440 }}>
         <h1 className="brand brand-md">Participate</h1>
-        <p className="muted">Enter the 6-digit code from the host.</p>
         <form className="stack" onSubmit={onJoin}>
           <div className="field">
             <label htmlFor="code">Quiz code</label>

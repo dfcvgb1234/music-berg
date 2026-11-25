@@ -461,8 +461,8 @@ export const HostVisualizer = forwardRef<HostVisualizerHandle, Props>(
     const unlockedLabel = revealed
       ? "Full track"
       : !active
-        ? `Ready · first unlock ${formatClipSeconds(INITIAL_CLIP_MS)}s`
-        : `${formatClipSeconds(clipMs)}s unlocked`;
+        ? "Ready"
+        : `${formatClipSeconds(clipMs)}s`;
     const unlockedPctDisplay =
       !active && !revealed
         ? Math.min(100, (INITIAL_CLIP_MS / TIMELINE_MAX_MS) * 100)

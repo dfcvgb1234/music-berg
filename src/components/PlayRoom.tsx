@@ -129,40 +129,30 @@ export function PlayRoom() {
         <section className="stack">
           <div>
             <p className="muted" style={{ margin: 0 }}>
-              Code {code}
+              {code}
+              {state
+                ? ` · ${Math.min(state.currentSongIndex + 1, state.songCount)}/${state.songCount}`
+                : ""}
+              {state?.status === "playing"
+                ? ` · ${formatClipSeconds(state.clipMs)}s · ${pointsForClip(state.clipMs)} pts`
+                : ""}
             </p>
             <h1 className="brand brand-md">
               {state?.status === "finished"
-                ? "Quiz finished"
+                ? "Finished"
                 : state?.status === "playing"
-                  ? "Name that track"
+                  ? "Guess"
                   : state?.status === "revealed"
                     ? "Revealed"
-                    : "Waiting for host"}
+                    : "Waiting"}
             </h1>
-            {state && (
-              <p className="muted">
-                Song {Math.min(state.currentSongIndex + 1, state.songCount)} /{" "}
-                {state.songCount}
-                {state.status === "playing"
-                  ? ` · host unlocked ${formatClipSeconds(state.clipMs)}s · ${pointsForClip(state.clipMs)} pts`
-                  : ""}
-              </p>
-            )}
           </div>
 
           <div className="surface stack">
             {state?.status === "playing" && (
-              <>
-                <div className="wave" aria-hidden>
-                  <i /><i /><i /><i /><i />
-                </div>
-                <p className="muted" style={{ margin: 0 }}>
-                  Listen on the host speakers — audio never plays on your
-                  device. Correct now: {pointsForClip(state.clipMs)} pts
-                  (starts at 10, −2 per unlock).
-                </p>
-              </>
+              <div className="wave" aria-hidden>
+                <i /><i /><i /><i /><i />
+              </div>
             )}
 
             {state?.currentSongName && (
@@ -177,7 +167,7 @@ export function PlayRoom() {
                   />
                 )}
                 <p className="ok-msg" style={{ margin: 0 }}>
-                  It was: {state.currentSongName}
+                  {state.currentSongName}
                 </p>
               </div>
             )}
@@ -186,10 +176,10 @@ export function PlayRoom() {
               <form className="guess-form guess-track" onSubmit={onGuess}>
                 <TrackPicker
                   id="guess-itunes"
-                  label="Your guess"
+                  label="Guess"
                   value={pick}
                   onChange={setPick}
-                  placeholder="Search title or artist…"
+                  placeholder="Search…"
                 />
                 <button
                   className="btn"
@@ -200,20 +190,10 @@ export function PlayRoom() {
                 </button>
               </form>
             ) : me?.guessedCorrect ? (
-              <p className="ok-msg">
-                You got it — hang tight for the next track.
-              </p>
+              <p className="ok-msg">Correct</p>
             ) : me?.lockedOut ? (
-              <p className="error">
-                Locked out this round — wait for the next song.
-              </p>
-            ) : (
-              <p className="muted">
-                {state?.status === "finished"
-                  ? "Thanks for playing."
-                  : "Host will start the next clip."}
-              </p>
-            )}
+              <p className="error">Locked out</p>
+            ) : null}
 
             {feedback && (
               <p className={feedback.startsWith("Wrong") || feedback.startsWith("No more") ? "error" : "ok-msg"}>

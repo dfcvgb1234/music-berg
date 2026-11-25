@@ -154,12 +154,6 @@ export function TrackPicker({
             <div className="track-selected-meta">
               <strong>{value.title}</strong>
               <span className="muted">{value.artist}</span>
-              {value.answerIds.length > 1 && (
-                <span className="muted">
-                  Includes {value.answerIds.length - 1} similar version
-                  {value.answerIds.length - 1 === 1 ? "" : "s"}
-                </span>
-              )}
             </div>
             <button
               type="button"
@@ -229,11 +223,6 @@ export function TrackPicker({
 
       {searching && (
         <div className="track-combobox">
-          {addingExtra && (
-            <p className="muted" style={{ margin: "0 0 0.35rem" }}>
-              Search for an alternate version that should also count as correct.
-            </p>
-          )}
           <input
             id={id}
             value={query}
@@ -278,10 +267,7 @@ export function TrackPicker({
                         <strong>{hit.title}</strong>
                         <span className="muted">
                           {hit.artist}
-                          {hit.variantCount > 0
-                            ? ` · ${hit.variantCount} similar hidden`
-                            : ""}
-                          {already ? " · already added" : ""}
+                          {already ? " · added" : ""}
                         </span>
                       </span>
                     </button>
@@ -309,12 +295,6 @@ export function TrackPicker({
 
       {loading && <p className="muted">Searching…</p>}
       {error && <p className="error">{error}</p>}
-      {!value && (
-        <p className="muted" style={{ margin: 0 }}>
-          Pick a track from the results — free text is not allowed. Similar
-          remasters are grouped together.
-        </p>
-      )}
     </div>
   );
 }

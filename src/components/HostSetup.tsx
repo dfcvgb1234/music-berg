@@ -74,9 +74,6 @@ export function HostSetup() {
 
       <section className="stack host-setup">
         <h1 className="brand brand-md">Start a new quiz</h1>
-        <p className="muted">
-          Pick a track list. You&apos;ll get a 6-digit code for the room.
-        </p>
 
         <form className="stack" onSubmit={onStart}>
           <div className="track-list-picker">
@@ -109,12 +106,6 @@ export function HostSetup() {
               {creating ? "Hide create" : "Create new track list"}
             </button>
           </div>
-
-          {trackLists.length === 0 && !creating && (
-            <p className="muted" style={{ margin: 0 }}>
-              Create a track list to start hosting.
-            </p>
-          )}
 
           <button
             className="btn"

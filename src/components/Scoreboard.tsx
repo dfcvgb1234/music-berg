@@ -10,11 +10,7 @@ export function Scoreboard({
   highlightId?: string | null;
 }) {
   if (participants.length === 0) {
-    return (
-      <p className="muted" style={{ margin: 0 }}>
-        Waiting for players…
-      </p>
-    );
+    return null;
   }
 
   return (

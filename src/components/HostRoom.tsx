@@ -9,8 +9,8 @@ import {
 } from "@/components/HostVisualizer";
 import { Scoreboard } from "@/components/Scoreboard";
 import {
-  EXTEND_CLIP_MS,
   formatClipSeconds,
+  nextExtendDeltaMs,
   pointsForClip,
 } from "@/lib/clipRules";
 import { useSessionStream } from "@/lib/useSessionStream";
@@ -62,9 +62,6 @@ export function HostRoom() {
         <div className="host-code-block">
           <p className="host-code-label">Join with code</p>
           <div className="code-pill host-code-xl">{code}</div>
-          <p className="muted host-code-hint">
-            Open Participate on phones with this code
-          </p>
         </div>
         <span className="badge">{connected ? "Live" : "Reconnecting…"}</span>
       </header>
@@ -78,7 +75,7 @@ export function HostRoom() {
                 {Math.min(state.currentSongIndex + 1, state.songCount)} /{" "}
                 {state.songCount}
                 {state.status === "finished" ? " · finished" : ""}
-                {pointsNow != null ? ` · ${pointsNow} pts if correct` : ""}
+                {pointsNow != null ? ` · ${pointsNow} pts` : ""}
               </p>
 
               {state.revealAnswer && state.currentSongName && (
@@ -119,7 +116,8 @@ export function HostRoom() {
                     disabled={busy || state.status !== "playing"}
                     onClick={() => run("extend")}
                   >
-                    Unlock +{formatClipSeconds(EXTEND_CLIP_MS)}s (−2 pts)
+                    Unlock +
+                    {formatClipSeconds(nextExtendDeltaMs(state.clipMs))}s
                   </button>
                   <button
                     className="btn secondary"
@@ -141,17 +139,8 @@ export function HostRoom() {
               )}
 
               {state.everyoneCorrect && state.status === "playing" && (
-                <p className="ok-msg">Everyone got it — advance when ready.</p>
+                <p className="ok-msg">Everyone got it</p>
               )}
-              {!state.everyoneCorrect &&
-                state.participants.length > 0 &&
-                state.status === "playing" && (
-                  <p className="muted">
-                    Still guessing — unlock more of the track or reveal. Correct
-                    now is worth {pointsForClip(state.clipMs)} pts (starts at 10,
-                    −2 per unlock).
-                  </p>
-                )}
             </>
           )}
           {error && <p className="error">{error}</p>}
@@ -159,9 +148,6 @@ export function HostRoom() {
 
         <aside className="host-score-panel">
           <h3>Scores</h3>
-          <p className="muted" style={{ margin: "0 0 0.75rem" }}>
-            {state?.participants.length ?? 0} joined
-          </p>
           <Scoreboard participants={state?.participants ?? []} />
         </aside>
       </div>

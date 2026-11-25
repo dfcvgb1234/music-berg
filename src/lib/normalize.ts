@@ -19,6 +19,9 @@ export {
   INITIAL_CLIP_MS,
   INITIAL_POINTS,
   POINTS_PER_EXTEND,
+  clipMsForExpansions,
+  expansionsForClip,
   formatClipSeconds,
+  nextExtendDeltaMs,
   pointsForClip,
 } from "@/lib/clipRules";

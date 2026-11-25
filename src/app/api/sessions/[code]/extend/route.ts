@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { EXTEND_CLIP_MS } from "@/lib/clipRules";
+import { nextExtendDeltaMs } from "@/lib/clipRules";
 import { sql } from "@/lib/db";
 import { broadcastSession, getSessionByCode } from "@/lib/quiz";
 
@@ -22,13 +22,15 @@ export async function POST(
     return NextResponse.json({ error: "Start playback first" }, { status: 400 });
   }
 
+  const deltaMs = nextExtendDeltaMs(session.clip_ms);
+
   await sql(
     `update sessions
      set clip_ms = clip_ms + $2,
          play_token = play_token + 1,
          play_started_at = now()
      where id = $1`,
-    [session.id, EXTEND_CLIP_MS],
+    [session.id, deltaMs],
   );
 
   const state = await broadcastSession(code);

@@ -310,25 +310,10 @@ export function CreateTrackListForm({
           onChange={(e) => setUploadSecret(e.target.value)}
           placeholder="Required on the published app"
         />
-        <p className="muted" style={{ margin: 0 }}>
-          Enter the upload secret configured for this app. Leave blank only for
-          local development.
-        </p>
       </div>
 
       <p className="muted" style={{ margin: 0 }}>
-        Search and pick each track (similar remasters are grouped). Optionally
-        add more accepted answers, then crop and convert audio to Opus 96 kbps
-        (max {formatBytes(uploadLimits.maxFileBytes)} each,{" "}
-        {formatBytes(uploadLimits.maxTemplateAudioBytes)} total audio
-        {uploadMode === "blob"
-          ? "; uploads go directly to storage"
-          : ""}
-        ). No song-count limit — only total size.
-      </p>
-
-      <p className="muted" style={{ margin: 0 }}>
-        {songs.length} song{songs.length === 1 ? "" : "s"} · encoded{" "}
+        {songs.length} song{songs.length === 1 ? "" : "s"} ·{" "}
         {formatBytes(totalAudioBytes)} /{" "}
         {formatBytes(uploadLimits.maxTemplateAudioBytes)}
       </p>
