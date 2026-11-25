@@ -181,7 +181,7 @@ export function PlayRoom() {
               {canGuess ? (
                 <form className="guess-form guess-track" onSubmit={onGuess}>
                   <TrackPicker
-                    id="guess-itunes"
+                    id="guess-track"
                     label="Guess"
                     value={pick}
                     onChange={setPick}

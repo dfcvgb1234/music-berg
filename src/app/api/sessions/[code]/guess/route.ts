@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { sql } from "@/lib/db";
 import { newId } from "@/lib/ids";
-import { getTrack, trackFingerprint } from "@/lib/itunes";
+import { getTrack, trackFingerprint } from "@/lib/deezer";
 import { pointsForClip } from "@/lib/normalize";
 import {
   broadcastSession,

@@ -1,20 +1,22 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { ItunesTrackHit } from "@/lib/itunes";
+import type { DeezerTrackHit } from "@/lib/deezer";
 import { readApiJson } from "@/lib/readApiJson";
 
 export type PickedTrack = {
+  /** Deezer track id (stored in DB column itunes_track_id). */
   itunesTrackId: string;
-  /** All accepted iTunes ids for this pick (primary + search variants). */
+  /** All accepted Deezer ids for this pick (primary + search variants). */
   answerIds: string[];
   title: string;
   artist: string;
   coverArtUrl: string | null;
+  previewUrl: string | null;
   label: string;
 };
 
-function hitToPick(hit: ItunesTrackHit): PickedTrack {
+function hitToPick(hit: DeezerTrackHit): PickedTrack {
   const ids = hit.matchedIds?.length ? hit.matchedIds : [hit.id];
   return {
     itunesTrackId: hit.id,
@@ -22,6 +24,7 @@ function hitToPick(hit: ItunesTrackHit): PickedTrack {
     title: hit.title,
     artist: hit.artist,
     coverArtUrl: hit.coverArtUrl,
+    previewUrl: hit.previewUrl,
     label: `${hit.artist} — ${hit.title}`,
   };
 }
@@ -47,7 +50,7 @@ export function TrackPicker({
   placeholder?: string;
 }) {
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<ItunesTrackHit[]>([]);
+  const [results, setResults] = useState<DeezerTrackHit[]>([]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -77,11 +80,11 @@ export function TrackPicker({
         setError(null);
         try {
           const res = await fetch(
-            `/api/itunes/search?q=${encodeURIComponent(q)}`,
+            `/api/deezer/search?q=${encodeURIComponent(q)}`,
             { cache: "no-store" },
           );
           const data = await readApiJson<{
-            results?: ItunesTrackHit[];
+            results?: DeezerTrackHit[];
             error?: string;
           }>(res);
           if (!res.ok) throw new Error(data.error || "Search failed");
@@ -104,7 +107,7 @@ export function TrackPicker({
     ...answers.flatMap((a) => a.answerIds),
   ]);
 
-  const pickResult = (hit: ItunesTrackHit) => {
+  const pickResult = (hit: DeezerTrackHit) => {
     const pick = hitToPick(hit);
     if (addingExtra && value) {
       if (takenIds.has(pick.itunesTrackId)) {
