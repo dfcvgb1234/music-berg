@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { contentDispositionForMime, detectAudioMime } from "@/lib/audioMime";
 import { sql } from "@/lib/db";
+import { fetchDriveAudio } from "@/lib/driveAudio";
 import { getSessionByCode } from "@/lib/quiz";
 import { clientKey, rateLimit } from "@/lib/rateLimit";
 
@@ -12,6 +13,9 @@ export const maxDuration = 60;
  * Clip length is enforced on the host client (stop timer) so we don't depend
  * on ffmpeg byte-trimming — which is unavailable on Vercel Hobby and produces
  * invalid MP3s that appear silent until Reveal sends the untouched file.
+ *
+ * Bytes come from Postgres `audio_data` (default) or Google Drive via
+ * `drive_file_id` when AUDIO_STORAGE=drive (server proxies with Drive auth).
  */
 export async function GET(
   request: Request,
@@ -57,16 +61,39 @@ export async function GET(
   const rows = await sql<{
     id: string;
     mime_type: string;
-    audio_data: Uint8Array | Buffer;
-  }>(`select id, mime_type, audio_data from songs where id = $1`, [
-    songMeta.id,
-  ]);
+    audio_data: Uint8Array | Buffer | null;
+    drive_file_id: string | null;
+  }>(
+    `select id, mime_type, audio_data, drive_file_id from songs where id = $1`,
+    [songMeta.id],
+  );
   const song = rows[0];
   if (!song) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  const bytes = new Uint8Array(Buffer.from(song.audio_data));
+  let audioBuf: Buffer;
+  if (song.drive_file_id?.trim()) {
+    try {
+      audioBuf = await fetchDriveAudio(song.drive_file_id);
+    } catch (err) {
+      return NextResponse.json(
+        {
+          error:
+            err instanceof Error
+              ? `Could not load Drive audio: ${err.message}`
+              : "Could not load Drive audio",
+        },
+        { status: 502 },
+      );
+    }
+  } else if (song.audio_data != null) {
+    audioBuf = Buffer.from(song.audio_data);
+  } else {
+    return NextResponse.json({ error: "Audio missing" }, { status: 404 });
+  }
+
+  const bytes = new Uint8Array(audioBuf);
   const mime =
     song.mime_type?.trim() ||
     detectAudioMime(bytes, "audio/mpeg");

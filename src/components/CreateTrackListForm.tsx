@@ -19,6 +19,7 @@ type SongDraft = {
 };
 
 type UploadMode = "blob" | "direct" | "unknown";
+type DurableStorage = "drive" | "postgres" | "unknown";
 
 function allAnswerIds(pick: PickedTrack, extras: PickedTrack[]): string[] {
   return [
@@ -77,18 +78,31 @@ export function CreateTrackListForm({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [uploadMode, setUploadMode] = useState<UploadMode>("unknown");
+  const [durableStorage, setDurableStorage] =
+    useState<DurableStorage>("unknown");
 
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       try {
         const res = await fetch("/api/upload-mode", { cache: "no-store" });
-        const data = await readApiJson<{ mode?: string }>(res);
+        const data = await readApiJson<{
+          mode?: string;
+          transport?: string;
+          storage?: string;
+        }>(res);
         if (!cancelled) {
-          setUploadMode(data.mode === "blob" ? "blob" : "direct");
+          const transport = data.transport ?? data.mode;
+          setUploadMode(transport === "blob" ? "blob" : "direct");
+          setDurableStorage(
+            data.storage === "drive" ? "drive" : "postgres",
+          );
         }
       } catch {
-        if (!cancelled) setUploadMode("direct");
+        if (!cancelled) {
+          setUploadMode("direct");
+          setDurableStorage("postgres");
+        }
       }
     })();
     return () => {
@@ -316,6 +330,13 @@ export function CreateTrackListForm({
         {songs.length} song{songs.length === 1 ? "" : "s"} ·{" "}
         {formatBytes(totalAudioBytes)} /{" "}
         {formatBytes(uploadLimits.maxTemplateAudioBytes)}
+        {durableStorage === "drive"
+          ? " · durable store: Google Drive"
+          : durableStorage === "postgres"
+            ? uploadMode === "blob"
+              ? " · staging: Vercel Blob → Postgres"
+              : " · durable store: Postgres"
+            : ""}
       </p>
 
       <div className="song-rows">

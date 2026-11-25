@@ -7,10 +7,15 @@ import {
   isSupportedAudioBuffer,
   uploadLimits,
 } from "@/lib/audioValidate";
+import { durableAudioStorage } from "@/lib/audioStorage";
 import {
   deleteBlobQuiet,
   fetchPrivateBlobAudio,
 } from "@/lib/blobAudio";
+import {
+  deleteDriveQuiet,
+  uploadDriveAudio,
+} from "@/lib/driveAudio";
 import { sql } from "@/lib/db";
 import { newId } from "@/lib/ids";
 import {
@@ -88,6 +93,8 @@ type Validated = {
   buf: Buffer;
   mimeType: string;
   blobUrl?: string;
+  /** Set when durable storage is Google Drive. */
+  driveFileId?: string;
 };
 
 async function validateSongs(inputs: SongInput[]): Promise<Validated[] | Response> {
@@ -209,10 +216,62 @@ async function validateSongs(inputs: SongInput[]): Promise<Validated[] | Respons
   return validated;
 }
 
+function driveFileName(
+  song: Validated,
+  index: number,
+  mimeType: string,
+): string {
+  const ext = mimeType.includes("webm")
+    ? "webm"
+    : mimeType.includes("ogg") || mimeType.includes("opus")
+      ? "ogg"
+      : mimeType.includes("mpeg") || mimeType.includes("mp3")
+        ? "mp3"
+        : "bin";
+  const safe = song.displayName
+    .replace(/[^\w.\-]+/g, "_")
+    .replace(/_+/g, "_")
+    .slice(0, 80);
+  return `bergs-music/${safe || "track"}-${index + 1}.${ext}`;
+}
+
+async function persistDurableAudio(validated: Validated[]): Promise<Response | null> {
+  if (durableAudioStorage() !== "drive") return null;
+
+  for (let i = 0; i < validated.length; i++) {
+    const song = validated[i];
+    try {
+      song.driveFileId = await uploadDriveAudio({
+        buffer: song.buf,
+        mimeType: song.mimeType,
+        fileName: driveFileName(song, i, song.mimeType),
+      });
+    } catch (err) {
+      for (const prev of validated) {
+        if (prev.driveFileId) await deleteDriveQuiet(prev.driveFileId);
+      }
+      return NextResponse.json(
+        {
+          error:
+            err instanceof Error
+              ? `Google Drive upload failed: ${err.message}`
+              : "Google Drive upload failed",
+        },
+        { status: 502 },
+      );
+    }
+  }
+  return null;
+}
+
 async function insertTemplate(
   name: string,
   validated: Validated[],
-): Promise<{ id: string; name: string; songCount: number }> {
+): Promise<{ id: string; name: string; songCount: number } | Response> {
+  const driveErr = await persistDurableAudio(validated);
+  if (driveErr) return driveErr;
+
+  const useDrive = durableAudioStorage() === "drive";
   const templateId = newId();
   await sql(`insert into templates (id, name) values ($1, $2)`, [
     templateId,
@@ -222,14 +281,15 @@ async function insertTemplate(
   for (let i = 0; i < validated.length; i++) {
     const song = validated[i];
     await sql(
-      `insert into songs (id, template_id, display_name, mime_type, audio_data, sort_order, itunes_track_id, cover_art_url, artist_credit, itunes_answer_ids, answer_fingerprint)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+      `insert into songs (id, template_id, display_name, mime_type, audio_data, drive_file_id, sort_order, itunes_track_id, cover_art_url, artist_credit, itunes_answer_ids, answer_fingerprint)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
       [
         newId(),
         templateId,
         song.displayName,
         song.mimeType,
-        song.buf,
+        useDrive ? null : song.buf,
+        useDrive ? (song.driveFileId ?? null) : null,
         i,
         song.itunesTrackId,
         song.coverArtUrl,
@@ -292,6 +352,7 @@ export async function POST(request: Request) {
     const validated = await validateSongs(inputs);
     if (validated instanceof Response) return validated;
     const created = await insertTemplate(name, validated);
+    if (created instanceof Response) return created;
     return NextResponse.json(created);
   }
 
@@ -344,5 +405,6 @@ export async function POST(request: Request) {
   const validated = await validateSongs(inputs);
   if (validated instanceof Response) return validated;
   const created = await insertTemplate(name, validated);
+  if (created instanceof Response) return created;
   return NextResponse.json(created);
 }

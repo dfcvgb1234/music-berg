@@ -15,6 +15,7 @@ Set these in **Project → Settings → Environment Variables** for Production (
 | `RIFFRUSH_UPLOAD_SECRET` | Legacy alias | Still accepted if `BERGS_MUSIC_UPLOAD_SECRET` is unset. |
 | `BLOB_READ_WRITE_TOKEN` | **Yes (Hobby-safe uploads)** | Read-write token for private Blob store (e.g. `bergs-music-audio`). Enables browser → Blob uploads so `/api/templates` only receives small JSON (avoids the ~4.5 MB function body cap on Hobby). |
 | `BLOB_STORE_ID` | Optional | Added automatically when the Blob store is connected via the dashboard. |
+| `AUDIO_STORAGE` | Optional (`drive`) | Experiment: set to `drive` to keep durable audio in Google Drive (file IDs in Postgres) instead of `bytea`. Requires Drive OAuth or service-account env vars — see [google-drive.md](./google-drive.md). Leave unset for the default Blob/Postgres path. |
 | `VERCEL_SUPPORT_LARGE_REQUEST_BODY` | Optional | Only helps on Pro/Enterprise with **Performance (4GB)** Function CPU (20 MiB body beta). **Hobby cannot use Performance**, so prefer Blob uploads instead. |
 
 Generate a strong secret, e.g. `openssl rand -hex 24`.
