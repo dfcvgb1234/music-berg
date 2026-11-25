@@ -1,7 +1,7 @@
 "use client";
 
 import { upload } from "@vercel/blob/client";
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   AudioCropField,
   type PreparedAudio,
@@ -45,6 +45,23 @@ function safeAudioBlobPath(file: File, index: number): string {
   return `templates/${Date.now()}-${index}-${base}`.slice(0, 180);
 }
 
+function newSongKey(seq: number): string {
+  const rand =
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : `${Math.random().toString(36).slice(2)}`;
+  return `song-${seq}-${rand}`;
+}
+
+function emptySong(seq: number): SongDraft {
+  return {
+    key: newSongKey(seq),
+    pick: null,
+    extraAnswers: [],
+    audio: null,
+  };
+}
+
 export function CreateTrackListForm({
   onCreated,
   onCancel,
@@ -52,30 +69,103 @@ export function CreateTrackListForm({
   onCreated?: (trackList: { id: string; name: string; songCount: number }) => void;
   onCancel?: () => void;
 }) {
+  const seqRef = useRef(1);
   const [name, setName] = useState("");
   const [uploadSecret, setUploadSecret] = useState("");
-  const [songs, setSongs] = useState<SongDraft[]>([
-    { key: "1", pick: null, extraAnswers: [], audio: null },
-  ]);
+  const [songs, setSongs] = useState<SongDraft[]>(() => [emptySong(1)]);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [uploadMode, setUploadMode] = useState<UploadMode>("unknown");
 
   useEffect(() => {
+    let cancelled = false;
     void (async () => {
       try {
         const res = await fetch("/api/upload-mode", { cache: "no-store" });
         const data = await readApiJson<{ mode?: string }>(res);
-        setUploadMode(data.mode === "blob" ? "blob" : "direct");
+        if (!cancelled) {
+          setUploadMode(data.mode === "blob" ? "blob" : "direct");
+        }
       } catch {
-        setUploadMode("direct");
+        if (!cancelled) setUploadMode("direct");
       }
     })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
+
+  const totalAudioBytes = useMemo(
+    () =>
+      songs.reduce(
+        (sum, s) => sum + (s.audio?.file?.size ?? 0),
+        0,
+      ),
+    [songs],
+  );
+
+  const incomplete = useMemo(() => {
+    const missingPick: number[] = [];
+    const missingAudio: number[] = [];
+    const tooLarge: number[] = [];
+    songs.forEach((s, i) => {
+      const n = i + 1;
+      if (!s.pick) missingPick.push(n);
+      else if (!s.audio?.file) missingAudio.push(n);
+      else if (s.audio.file.size > uploadLimits.maxFileBytes) tooLarge.push(n);
+    });
+    return { missingPick, missingAudio, tooLarge };
+  }, [songs]);
+
+  const saveBlockers = useMemo(() => {
+    const reasons: string[] = [];
+    if (busy) reasons.push("Save in progress…");
+    if (uploadMode === "unknown") {
+      reasons.push("Checking upload mode…");
+    }
+    if (!name.trim()) reasons.push("Enter a track list name.");
+    if (incomplete.missingPick.length) {
+      const list = incomplete.missingPick.slice(0, 8).join(", ");
+      const more =
+        incomplete.missingPick.length > 8
+          ? ` (+${incomplete.missingPick.length - 8} more)`
+          : "";
+      reasons.push(
+        `Pick an iTunes track for song${incomplete.missingPick.length === 1 ? "" : "s"} ${list}${more}.`,
+      );
+    }
+    if (incomplete.missingAudio.length) {
+      const list = incomplete.missingAudio.slice(0, 8).join(", ");
+      const more =
+        incomplete.missingAudio.length > 8
+          ? ` (+${incomplete.missingAudio.length - 8} more)`
+          : "";
+      reasons.push(
+        `Convert audio to Opus for song${incomplete.missingAudio.length === 1 ? "" : "s"} ${list}${more} (Convert to Opus on each row).`,
+      );
+    }
+    if (incomplete.tooLarge.length) {
+      reasons.push(
+        `Song${incomplete.tooLarge.length === 1 ? "" : "s"} ${incomplete.tooLarge.join(", ")} exceed ${formatBytes(uploadLimits.maxFileBytes)} after encode.`,
+      );
+    }
+    if (totalAudioBytes > uploadLimits.maxTemplateAudioBytes) {
+      reasons.push(
+        `Total audio ${formatBytes(totalAudioBytes)} exceeds ${formatBytes(uploadLimits.maxTemplateAudioBytes)}.`,
+      );
+    }
+    return reasons;
+  }, [busy, uploadMode, name, incomplete, totalAudioBytes]);
+
+  const canSave = saveBlockers.length === 0;
 
   const onCreate = async (e: FormEvent) => {
     e.preventDefault();
+    if (!canSave) {
+      setError(saveBlockers[0] ?? "Cannot save yet");
+      return;
+    }
     setError(null);
     setStatus(null);
     setBusy(true);
@@ -171,9 +261,8 @@ export function CreateTrackListForm({
       if (!res.ok) throw new Error(data.error || "Could not save track list");
       setStatus(`Saved track list “${data.name}”`);
       setName("");
-      setSongs([
-        { key: String(Date.now()), pick: null, extraAnswers: [], audio: null },
-      ]);
+      seqRef.current += 1;
+      setSongs([emptySong(seqRef.current)]);
       if (data.id && data.name) {
         onCreated?.({
           id: data.id,
@@ -187,6 +276,16 @@ export function CreateTrackListForm({
     } finally {
       setBusy(false);
     }
+  };
+
+  const songStatus = (song: SongDraft) => {
+    if (!song.pick && !song.audio?.file) return "Needs track + Opus convert";
+    if (!song.pick) return "Needs iTunes track pick";
+    if (!song.audio?.file) return "Needs Convert to Opus";
+    if (song.audio.file.size > uploadLimits.maxFileBytes) {
+      return `Encoded file too large (${formatBytes(song.audio.file.size)})`;
+    }
+    return `Ready · ${formatBytes(song.audio.file.size)}`;
   };
 
   return (
@@ -225,57 +324,78 @@ export function CreateTrackListForm({
         {uploadMode === "blob"
           ? "; uploads go directly to storage"
           : ""}
-        ).
+        ). No song-count limit — only total size.
+      </p>
+
+      <p className="muted" style={{ margin: 0 }}>
+        {songs.length} song{songs.length === 1 ? "" : "s"} · encoded{" "}
+        {formatBytes(totalAudioBytes)} /{" "}
+        {formatBytes(uploadLimits.maxTemplateAudioBytes)}
       </p>
 
       <div className="song-rows">
-        {songs.map((song, index) => (
-          <div className="song-row song-row-multi" key={song.key}>
-            <TrackPicker
-              id={`track-${song.key}`}
-              label={`Song ${index + 1}`}
-              value={song.pick}
-              answers={song.extraAnswers}
-              multi
-              onChange={(pick) => {
-                setSongs((prev) => {
-                  const next = [...prev];
-                  next[index] = { ...next[index], pick, extraAnswers: [] };
-                  return next;
-                });
-              }}
-              onAnswersChange={(extraAnswers) => {
-                setSongs((prev) => {
-                  const next = [...prev];
-                  next[index] = { ...next[index], extraAnswers };
-                  return next;
-                });
-              }}
-              placeholder="Search title or artist…"
-            />
-            <AudioCropField
-              id={`song-file-${song.key}`}
-              label={`Song ${index + 1} audio`}
-              value={song.audio}
-              disabled={busy}
-              onChange={(audio) => {
-                setSongs((prev) => {
-                  const next = [...prev];
-                  next[index] = { ...next[index], audio };
-                  return next;
-                });
-              }}
-            />
-            <button
-              type="button"
-              className="btn secondary"
-              disabled={songs.length === 1 || busy}
-              onClick={() => setSongs(songs.filter((s) => s.key !== song.key))}
-            >
-              Remove
-            </button>
-          </div>
-        ))}
+        {songs.map((song, index) => {
+          const ready = Boolean(song.pick && song.audio?.file);
+          return (
+            <div className="song-row song-row-multi" key={song.key}>
+              <TrackPicker
+                id={`track-${song.key}`}
+                label={`Song ${index + 1}`}
+                value={song.pick}
+                answers={song.extraAnswers}
+                multi
+                onChange={(pick) => {
+                  setSongs((prev) =>
+                    prev.map((s) =>
+                      s.key === song.key
+                        ? { ...s, pick, extraAnswers: [] }
+                        : s,
+                    ),
+                  );
+                }}
+                onAnswersChange={(extraAnswers) => {
+                  setSongs((prev) =>
+                    prev.map((s) =>
+                      s.key === song.key ? { ...s, extraAnswers } : s,
+                    ),
+                  );
+                }}
+                placeholder="Search title or artist…"
+              />
+              <AudioCropField
+                id={`song-file-${song.key}`}
+                label={`Song ${index + 1} audio`}
+                value={song.audio}
+                disabled={busy}
+                onChange={(audio) => {
+                  setSongs((prev) =>
+                    prev.map((s) =>
+                      s.key === song.key ? { ...s, audio } : s,
+                    ),
+                  );
+                }}
+              />
+              <div className="song-row-side">
+                <p
+                  className={ready ? "ok-msg" : "muted"}
+                  style={{ margin: 0, fontSize: "0.85rem" }}
+                >
+                  {songStatus(song)}
+                </p>
+                <button
+                  type="button"
+                  className="btn secondary"
+                  disabled={songs.length === 1 || busy}
+                  onClick={() =>
+                    setSongs((prev) => prev.filter((s) => s.key !== song.key))
+                  }
+                >
+                  Remove
+                </button>
+              </div>
+            </div>
+          );
+        })}
       </div>
 
       <div className="actions">
@@ -283,17 +403,10 @@ export function CreateTrackListForm({
           type="button"
           className="btn secondary"
           disabled={busy}
-          onClick={() =>
-            setSongs([
-              ...songs,
-              {
-                key: String(Date.now()),
-                pick: null,
-                extraAnswers: [],
-                audio: null,
-              },
-            ])
-          }
+          onClick={() => {
+            seqRef.current += 1;
+            setSongs((prev) => [...prev, emptySong(seqRef.current)]);
+          }}
         >
           Add song
         </button>
@@ -302,18 +415,23 @@ export function CreateTrackListForm({
             Cancel
           </button>
         )}
-        <button
-          className="btn"
-          type="submit"
-          disabled={
-            busy ||
-            uploadMode === "unknown" ||
-            songs.some((s) => !s.pick || !s.audio?.file)
-          }
-        >
+        <button className="btn" type="submit" disabled={!canSave}>
           {busy ? "Saving…" : "Save track list"}
         </button>
       </div>
+
+      {!canSave && saveBlockers.length > 0 && (
+        <div className="save-blockers" role="status">
+          <p className="muted" style={{ margin: "0 0 0.35rem" }}>
+            Save is disabled:
+          </p>
+          <ul className="save-blocker-list">
+            {saveBlockers.map((reason) => (
+              <li key={reason}>{reason}</li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {error && <p className="error">{error}</p>}
       {status && <p className="ok-msg">{status}</p>}
