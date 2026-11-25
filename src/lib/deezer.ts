@@ -1,7 +1,4 @@
-import {
-  canonicalScore,
-  trackFingerprint,
-} from "@/lib/trackNormalize";
+import { trackFingerprint } from "@/lib/trackNormalize";
 
 export type DeezerTrackHit = {
   id: string;
@@ -56,12 +53,12 @@ function mapTrack(
   const id = row.id != null ? String(row.id) : "";
   if (!id || !/^\d+$/.test(id)) return null;
 
-  const title = (row.title_short || row.title || "").trim();
+  const title = (row.title || row.title_short || "").trim();
   if (!title) return null;
 
   const cover =
-    row.album?.cover_big?.trim() ||
     row.album?.cover_medium?.trim() ||
+    row.album?.cover_big?.trim() ||
     null;
 
   return {
@@ -79,8 +76,8 @@ function mapTrack(
 }
 
 /**
- * Collapse remasters / soundtrack cuts / near-duplicates into one row per
- * artist + base title, keeping the most canonical listing as the face.
+ * Collapse remasters / near-duplicates into one row per artist + base title.
+ * Preserves Deezer relevance order (first occurrence keeps the slot and face).
  */
 export function dedupeTrackHits(
   hits: Omit<DeezerTrackHit, "matchedIds" | "variantCount">[],
@@ -90,43 +87,41 @@ export function dedupeTrackHits(
     string,
     {
       best: Omit<DeezerTrackHit, "matchedIds" | "variantCount">;
-      bestScore: number;
       ids: string[];
+      order: number;
     }
   >();
 
+  let order = 0;
   for (const hit of hits) {
     const key = trackFingerprint(hit.artist, hit.title);
-    if (!key.endsWith("|") && key.includes("|")) {
-      const score = canonicalScore(hit);
-      const existing = groups.get(key);
-      if (!existing) {
-        groups.set(key, { best: hit, bestScore: score, ids: [hit.id] });
-        continue;
-      }
-      if (!existing.ids.includes(hit.id)) existing.ids.push(hit.id);
-      if (score < existing.bestScore) {
-        existing.best = hit;
-        existing.bestScore = score;
-      } else if (
-        score === existing.bestScore &&
-        !existing.best.coverArtUrl &&
-        hit.coverArtUrl
-      ) {
-        existing.best = { ...existing.best, coverArtUrl: hit.coverArtUrl };
-      }
+    if (key.endsWith("|") || !key.includes("|")) continue;
+
+    const existing = groups.get(key);
+    if (!existing) {
+      groups.set(key, {
+        best: hit,
+        ids: [hit.id],
+        order: order++,
+      });
+      continue;
+    }
+    // Keep the first (most relevant) Deezer hit as the face; only merge ids /
+    // backfill missing artwork from later variants.
+    if (!existing.ids.includes(hit.id)) existing.ids.push(hit.id);
+    if (!existing.best.coverArtUrl && hit.coverArtUrl) {
+      existing.best = { ...existing.best, coverArtUrl: hit.coverArtUrl };
     }
   }
 
-  const ranked = [...groups.values()].sort(
-    (a, b) => a.bestScore - b.bestScore,
-  );
-
-  return ranked.slice(0, limit).map(({ best, ids }) => ({
-    ...best,
-    matchedIds: ids,
-    variantCount: Math.max(0, ids.length - 1),
-  }));
+  return [...groups.values()]
+    .sort((a, b) => a.order - b.order)
+    .slice(0, limit)
+    .map(({ best, ids }) => ({
+      ...best,
+      matchedIds: ids,
+      variantCount: Math.max(0, ids.length - 1),
+    }));
 }
 
 export async function searchSongs(
