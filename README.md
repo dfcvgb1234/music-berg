@@ -10,7 +10,7 @@ Realtime music quiz: short clips, longer extends, race the room to name the trac
 
 ## Notes
 
-- App upload caps: **6 MB per MP3**, **48 MB total** per track list (up to 8 songs).
+- App upload caps: **6 MB per file**, **50 MB total audio** per track list (no song-count cap).
 - Creating track lists requires `BERGS_MUSIC_UPLOAD_SECRET` or legacy `RIFFRUSH_UPLOAD_SECRET` (header `x-upload-secret`). Locally, uploads work without a secret when `DATABASE_URL` is unset.
 - Authors can add **multiple accepted answers** per track; guesses also match by normalized artist+title fingerprint.
 - Session audio is **host-token only** — participants never receive clips or full tracks.

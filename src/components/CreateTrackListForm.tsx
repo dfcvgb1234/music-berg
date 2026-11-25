@@ -94,14 +94,9 @@ export function CreateTrackListForm({
         }
         total += song.audio.file.size;
       }
-      if (total > uploadLimits.maxRequestBytes) {
+      if (total > uploadLimits.maxTemplateAudioBytes) {
         throw new Error(
-          `Total upload too large (max ${formatBytes(uploadLimits.maxRequestBytes)}). Use shorter clips.`,
-        );
-      }
-      if (songs.length > uploadLimits.maxSongsPerTemplate) {
-        throw new Error(
-          `At most ${uploadLimits.maxSongsPerTemplate} songs per track list`,
+          `Track list audio too large (max ${formatBytes(uploadLimits.maxTemplateAudioBytes)} total). Use shorter clips.`,
         );
       }
 
@@ -225,7 +220,8 @@ export function CreateTrackListForm({
       <p className="muted" style={{ margin: 0 }}>
         Search and pick each track (similar remasters are grouped). Optionally
         add more accepted answers, then crop and convert audio to Opus 96 kbps
-        (max {formatBytes(uploadLimits.maxFileBytes)} each after encode
+        (max {formatBytes(uploadLimits.maxFileBytes)} each,{" "}
+        {formatBytes(uploadLimits.maxTemplateAudioBytes)} total audio
         {uploadMode === "blob"
           ? "; uploads go directly to storage"
           : ""}

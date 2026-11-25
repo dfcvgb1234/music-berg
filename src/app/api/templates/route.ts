@@ -97,14 +97,6 @@ async function validateSongs(inputs: SongInput[]): Promise<Validated[] | Respons
       { status: 400 },
     );
   }
-  if (inputs.length > uploadLimits.maxSongsPerTemplate) {
-    return NextResponse.json(
-      {
-        error: `At most ${uploadLimits.maxSongsPerTemplate} songs per track list`,
-      },
-      { status: 400 },
-    );
-  }
 
   const validated: Validated[] = [];
   let totalBytes = 0;
@@ -192,8 +184,13 @@ async function validateSongs(inputs: SongInput[]): Promise<Validated[] | Respons
     const mimeType = detectAudioMime(buf, "audio/ogg");
 
     totalBytes += buf.length;
-    if (totalBytes > uploadLimits.maxRequestBytes) {
-      return NextResponse.json({ error: "Request too large" }, { status: 413 });
+    if (totalBytes > uploadLimits.maxTemplateAudioBytes) {
+      return NextResponse.json(
+        {
+          error: `Track list audio too large (max ${formatBytes(uploadLimits.maxTemplateAudioBytes)} total)`,
+        },
+        { status: 413 },
+      );
     }
 
     validated.push({
@@ -306,7 +303,7 @@ export async function POST(request: Request) {
   ) {
     return NextResponse.json(
       {
-        error: `Upload too large (max ${formatBytes(uploadLimits.maxRequestBytes)} total). Use shorter clips.`,
+        error: `Upload too large (max ${formatBytes(uploadLimits.maxTemplateAudioBytes)} audio total). Use shorter clips.`,
       },
       { status: 413 },
     );

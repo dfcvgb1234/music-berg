@@ -1,10 +1,17 @@
 /** App-level caps for template audio uploads (Opus clips / legacy MP3). */
 export const uploadLimits = {
   maxFileBytes: 6 * 1024 * 1024,
-  maxSongsPerTemplate: 8,
   maxTemplates: 40,
-  /** Comfortably fits several 5–6MB tracks plus multipart overhead. */
-  maxRequestBytes: 48 * 1024 * 1024,
+  /**
+   * Max sum of stored audio bytes per track list (no song-count cap).
+   * Applies to encoded clips on create (client + server).
+   */
+  maxTemplateAudioBytes: 50 * 1024 * 1024,
+  /**
+   * Multipart request body ceiling (audio + form overhead). Kept at/above
+   * maxTemplateAudioBytes for the local direct-upload path.
+   */
+  maxRequestBytes: 50 * 1024 * 1024,
 } as const;
 
 export function formatBytes(n: number): string {
