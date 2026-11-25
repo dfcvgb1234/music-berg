@@ -49,8 +49,10 @@ export function HostRoom() {
 
   const pointsNow =
     state?.status === "playing"
-      ? pointsForClip(state.clipMs, state.extendCount)
+      ? (state.pointsNow ?? pointsForClip(state.clipMs, state.extendCount))
       : null;
+  const nextCost =
+    state?.status === "playing" ? (state.nextExtendCost ?? 0) : 0;
   const finished = state?.status === "finished";
 
   return (
@@ -121,18 +123,24 @@ export function HostRoom() {
                   </button>
                   <button
                     className="btn secondary"
-                    disabled={busy || state.status !== "playing"}
+                    disabled={
+                      busy ||
+                      state.status !== "playing" ||
+                      state.canExtend === false ||
+                      !(state.nextExtendMs > 0)
+                    }
                     onClick={() => run("extend")}
                   >
                     Unlock +
-                    {formatClipSeconds(
-                      state.nextExtendMs ??
-                        Math.max(0, 2000),
-                    )}
-                    s
+                    {formatClipSeconds(state.nextExtendMs ?? 0)}s
+                    {nextCost > 0 ? ` (−${nextCost})` : ""}
                     {state.segmentPointsMs?.length
-                      ? " (segment)"
-                      : ""}
+                      ? " · segment"
+                      : state.durationMs != null &&
+                          state.clipMs + (state.nextExtendMs ?? 0) >=
+                            state.durationMs
+                        ? " · full"
+                        : ""}
                   </button>
                   <button
                     className="btn secondary"

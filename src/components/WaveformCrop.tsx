@@ -8,6 +8,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type RefObject,
 } from "react";
+import { MAX_SEGMENTS } from "@/lib/clipRules";
 
 export type WaveformCropProps = {
   /** Source or encoded audio file to visualize. */
@@ -343,7 +344,7 @@ export function WaveformCrop({
         .map((v) => Math.round(v * 10) / 10)
         .filter((v, i, arr) => arr.indexOf(v) === i)
         .sort((a, b) => a - b)
-        .slice(0, 40);
+          .slice(0, MAX_SEGMENTS);
       onSegmentPointsChange(next);
     }
     e.currentTarget.setPointerCapture(e.pointerId);
@@ -401,7 +402,7 @@ export function WaveformCrop({
       .map((v) => Math.round(v * 10) / 10)
       .filter((v, i, arr) => arr.indexOf(v) === i)
       .sort((a, b) => a - b)
-      .slice(0, 40);
+      .slice(0, MAX_SEGMENTS);
     onSegmentPointsChange(next);
   };
 
@@ -437,10 +438,13 @@ export function WaveformCrop({
           <button
             type="button"
             className="btn secondary"
-            disabled={disabled}
+            disabled={disabled || segmentPointsSec.length >= MAX_SEGMENTS}
             onClick={addSegmentAtPlayhead}
           >
             Mark segment at playhead
+            {segmentPointsSec.length > 0
+              ? ` (${segmentPointsSec.length}/${MAX_SEGMENTS})`
+              : ` (max ${MAX_SEGMENTS})`}
           </button>
         </div>
       )}

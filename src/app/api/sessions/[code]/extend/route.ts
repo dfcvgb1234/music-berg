@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import {
+  canExtendClip,
+  MAX_EXTENDS,
   nextClipMs,
   normalizeSegmentPointsMs,
 } from "@/lib/clipRules";
@@ -25,8 +27,11 @@ export async function POST(
     return NextResponse.json({ error: "Start playback first" }, { status: 400 });
   }
 
-  const songs = await sql<{ segment_points_ms: string | null }>(
-    `select segment_points_ms from songs
+  const songs = await sql<{
+    segment_points_ms: string | null;
+    duration_ms: number | null;
+  }>(
+    `select segment_points_ms, duration_ms from songs
      where template_id = $1
      order by sort_order asc, created_at asc`,
     [session.template_id],
@@ -35,9 +40,32 @@ export async function POST(
   const segmentPointsMs = normalizeSegmentPointsMs(
     current?.segment_points_ms ?? null,
   );
-  const targetMs = nextClipMs(session.clip_ms, segmentPointsMs);
+  const durationMs =
+    current?.duration_ms != null && Number.isFinite(Number(current.duration_ms))
+      ? Math.max(0, Number(current.duration_ms))
+      : null;
   const extendCount =
-    (session.extend_count != null ? Number(session.extend_count) : 0) + 1;
+    session.extend_count != null ? Number(session.extend_count) : 0;
+
+  if (
+    !canExtendClip(session.clip_ms, {
+      segmentPointsMs,
+      durationMs,
+      extendCount,
+    })
+  ) {
+    return NextResponse.json(
+      { error: "Clip already fully unlocked" },
+      { status: 400 },
+    );
+  }
+
+  const targetMs = nextClipMs(session.clip_ms, {
+    segmentPointsMs,
+    durationMs,
+    extendCount,
+  });
+  const nextExtendCount = Math.min(MAX_EXTENDS, extendCount + 1);
 
   await sql(
     `update sessions
@@ -46,7 +74,7 @@ export async function POST(
          play_token = play_token + 1,
          play_started_at = now()
      where id = $1`,
-    [session.id, targetMs, extendCount],
+    [session.id, targetMs, nextExtendCount],
   );
 
   const state = await broadcastSession(code);

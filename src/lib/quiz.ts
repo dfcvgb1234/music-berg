@@ -1,7 +1,10 @@
 import {
+  canExtendClip,
   expansionsForClip,
+  nextExtendCost,
   nextExtendDeltaMsForTrack,
   normalizeSegmentPointsMs,
+  pointsForExtends,
 } from "@/lib/clipRules";
 import { sql } from "@/lib/db";
 import { publish } from "@/lib/pubsub";
@@ -33,8 +36,16 @@ export type SessionState = {
   extendCount: number;
   /** Segment boundaries (ms) for the current song; empty = progressive unlock. */
   segmentPointsMs: number[];
+  /** Full cropped clip length when known. */
+  durationMs: number | null;
   /** Next Unlock delta for the current song. */
   nextExtendMs: number;
+  /** Points deducted by the next Unlock (0 if none left). */
+  nextExtendCost: number;
+  /** Points currently available for a correct guess. */
+  pointsNow: number;
+  /** False when clip is already full / max extends reached. */
+  canExtend: boolean;
   playToken: number;
   playStartedAt: string | null;
   currentSongId: string | null;
@@ -69,6 +80,7 @@ type SongRow = {
   sort_order: number;
   cover_art_url: string | null;
   segment_points_ms: string | null;
+  duration_ms: number | null;
 };
 
 type ParticipantRow = {
@@ -98,7 +110,7 @@ export async function buildSessionState(
   if (!session) return null;
 
   const songs = await sql<SongRow>(
-    `select id, display_name, sort_order, cover_art_url, segment_points_ms
+    `select id, display_name, sort_order, cover_art_url, segment_points_ms, duration_ms
      from songs where template_id = $1
      order by sort_order asc, created_at asc`,
     [session.template_id],
@@ -146,10 +158,20 @@ export async function buildSessionState(
   const segmentPointsMs = normalizeSegmentPointsMs(
     currentSong?.segment_points_ms ?? null,
   );
+  const durationMs =
+    currentSong?.duration_ms != null &&
+    Number.isFinite(Number(currentSong.duration_ms))
+      ? Math.max(0, Number(currentSong.duration_ms))
+      : null;
   const extendCount =
     session.extend_count != null && Number.isFinite(Number(session.extend_count))
       ? Math.max(0, Number(session.extend_count))
       : expansionsForClip(session.clip_ms);
+  const clipOpts = {
+    segmentPointsMs,
+    durationMs,
+    extendCount,
+  };
 
   return {
     code: session.code,
@@ -161,7 +183,16 @@ export async function buildSessionState(
     clipMs: session.clip_ms,
     extendCount,
     segmentPointsMs,
-    nextExtendMs: nextExtendDeltaMsForTrack(session.clip_ms, segmentPointsMs),
+    durationMs,
+    nextExtendMs: nextExtendDeltaMsForTrack(
+      session.clip_ms,
+      segmentPointsMs,
+      durationMs,
+      extendCount,
+    ),
+    nextExtendCost: nextExtendCost(extendCount),
+    pointsNow: pointsForExtends(extendCount),
+    canExtend: canExtendClip(session.clip_ms, clipOpts),
     playToken: session.play_token,
     playStartedAt: session.play_started_at
       ? new Date(session.play_started_at).toISOString()

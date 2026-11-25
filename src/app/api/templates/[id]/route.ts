@@ -28,6 +28,7 @@ type SongRow = {
   cover_art_url: string | null;
   artist_credit: string | null;
   segment_points_ms: string | null;
+  duration_ms: number | null;
   mime_type: string;
 };
 
@@ -55,7 +56,7 @@ export async function GET(
 
   const songs = await sql<SongRow>(
     `select id, display_name, sort_order, itunes_track_id, itunes_answer_ids,
-            cover_art_url, artist_credit, segment_points_ms, mime_type
+            cover_art_url, artist_credit, segment_points_ms, duration_ms, mime_type
      from songs where template_id = $1
      order by sort_order asc, created_at asc`,
     [id],
@@ -113,6 +114,10 @@ export async function GET(
       sortOrder: song.sort_order,
       mimeType: song.mime_type,
       segmentPointsMs: normalizeSegmentPointsMs(song.segment_points_ms),
+      durationMs:
+        song.duration_ms != null && Number.isFinite(Number(song.duration_ms))
+          ? Number(song.duration_ms)
+          : null,
       pick: primaryId
         ? {
             itunesTrackId: primaryId,
@@ -165,6 +170,7 @@ export async function PUT(
         blobUrl?: string;
         keepSongId?: string;
         segmentPointsMs?: unknown;
+        durationMs?: unknown;
       }>;
     } | null;
     const name = String(body?.name ?? "").trim().slice(0, 80);
@@ -182,6 +188,7 @@ export async function PUT(
       blobUrl: String(s.blobUrl ?? "").trim() || undefined,
       keepSongId: String(s.keepSongId ?? "").trim() || undefined,
       segmentPointsMs: s.segmentPointsMs,
+      durationMs: s.durationMs,
     }));
     const validated = await validateSongs(inputs, { templateId: id });
     if (validated instanceof Response) return validated;
@@ -214,6 +221,7 @@ export async function PUT(
   const itunesIds = form.getAll("itunesTrackIds").map((v) => String(v).trim());
   const answerIdBlobs = form.getAll("itunesAnswerIds");
   const segmentBlobs = form.getAll("segmentPointsMs");
+  const durationBlobs = form.getAll("durationMs");
   const keepIds = form.getAll("keepSongIds").map((v) => String(v).trim());
   const files = form.getAll("songFiles");
 
@@ -235,6 +243,7 @@ export async function PUT(
       file,
       keepSongId: file ? undefined : keepSongId,
       segmentPointsMs: segmentBlobs[i],
+      durationMs: durationBlobs[i],
     };
   });
 

@@ -9,6 +9,7 @@ import {
 } from "@/components/AudioCropField";
 import { TrackPicker, type PickedTrack } from "@/components/TrackPicker";
 import { OPUS_MIME } from "@/lib/audioMime";
+import { probeAudioDuration } from "@/lib/clientOpusEncode";
 import { readApiJson } from "@/lib/readApiJson";
 import { formatBytes, uploadLimits } from "@/lib/uploadLimits";
 
@@ -19,6 +20,8 @@ type SongDraft = {
   audio: PreparedAudio | null;
   /** Absolute segment times on the visualized file (source or existing clip). */
   segmentPointsSec: number[];
+  /** Cropped clip length in ms (for non-segmented full-track unlock). */
+  durationMs?: number | null;
   /** Existing DB song — keep audio when `audio` is null. */
   existingSongId?: string;
   existingClip?: { file: File; label: string } | null;
@@ -85,6 +88,17 @@ function segmentPointsMsFromDraft(song: SongDraft): number[] {
   ).map((s) => Math.round(s * 1000));
 }
 
+function durationMsFromDraft(song: SongDraft): number | null {
+  if (song.audio?.file) {
+    const ms = Math.round((song.audio.endSec - song.audio.startSec) * 1000);
+    return ms >= 500 ? ms : null;
+  }
+  if (song.durationMs != null && song.durationMs >= 500) {
+    return Math.round(song.durationMs);
+  }
+  return null;
+}
+
 export function CreateTrackListForm({
   onCreated,
   onCancel,
@@ -142,6 +156,7 @@ export function CreateTrackListForm({
         songs?: Array<{
           id: string;
           segmentPointsMs?: number[];
+          durationMs?: number | null;
           pick: PickedTrack | null;
           extraAnswers?: PickedTrack[];
           displayName?: string;
@@ -160,6 +175,7 @@ export function CreateTrackListForm({
           extraAnswers: song.extraAnswers ?? [],
           audio: null,
           segmentPointsSec: (song.segmentPointsMs ?? []).map((ms) => ms / 1000),
+          durationMs: song.durationMs ?? null,
           existingSongId: song.id,
           existingClip: null,
         });
@@ -187,11 +203,21 @@ export function CreateTrackListForm({
             `${song.displayName || `song-${i + 1}`}.${ext}`,
             { type: song.mimeType || OPUS_MIME },
           );
+          let probedMs: number | null = null;
+          try {
+            const sec = await probeAudioDuration(file);
+            if (Number.isFinite(sec) && sec > 0) {
+              probedMs = Math.round(sec * 1000);
+            }
+          } catch {
+            /* keep stored duration */
+          }
           setSongs((prev) =>
             prev.map((s) =>
               s.existingSongId === song.id
                 ? {
                     ...s,
+                    durationMs: s.durationMs ?? probedMs,
                     existingClip: {
                       file,
                       label: song.displayName || file.name,
@@ -341,11 +367,13 @@ export function CreateTrackListForm({
           blobUrl?: string;
           keepSongId?: string;
           segmentPointsMs: number[];
+          durationMs: number | null;
         }> = [];
         for (let i = 0; i < songs.length; i++) {
           const song = songs[i];
           const pick = song.pick!;
           const segmentPointsMs = segmentPointsMsFromDraft(song);
+          const durationMs = durationMsFromDraft(song);
           if (song.audio?.file) {
             setStatus(`Uploading clip ${i + 1}/${songs.length}…`);
             const file = song.audio.file;
@@ -361,6 +389,7 @@ export function CreateTrackListForm({
               answerIds: allAnswerIds(pick, song.extraAnswers),
               blobUrl: blob.url,
               segmentPointsMs,
+              durationMs,
             });
           } else {
             payloadSongs.push({
@@ -368,6 +397,7 @@ export function CreateTrackListForm({
               answerIds: allAnswerIds(pick, song.extraAnswers),
               keepSongId: song.existingSongId,
               segmentPointsMs,
+              durationMs,
             });
           }
         }
@@ -402,6 +432,10 @@ export function CreateTrackListForm({
           form.append(
             "segmentPointsMs",
             JSON.stringify(segmentPointsMsFromDraft(song)),
+          );
+          form.append(
+            "durationMs",
+            String(durationMsFromDraft(song) ?? ""),
           );
           if (song.audio?.file) {
             form.append("songFiles", song.audio.file);
@@ -611,6 +645,11 @@ export function CreateTrackListForm({
                             ...s,
                             audio,
                             existingSongId: audio ? undefined : s.existingSongId,
+                            durationMs: audio
+                              ? Math.round(
+                                  (audio.endSec - audio.startSec) * 1000,
+                                )
+                              : s.durationMs,
                             segmentPointsSec: audio
                               ? audio.segmentPointsSec.map(
                                   (p) => p + audio.startSec,

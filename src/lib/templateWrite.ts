@@ -39,6 +39,8 @@ export type SongInput = {
   itunesTrackId: string;
   answerIds: string[];
   segmentPointsMs?: unknown;
+  /** Cropped clip length in ms (from client encode / probe). */
+  durationMs?: unknown;
   /** Keep audio from an existing song on this template (edit). */
   keepSongId?: string;
   /** Private Vercel Blob URL (Hobby-safe path). */
@@ -57,8 +59,15 @@ export type ValidatedSong = {
   buf: Buffer;
   mimeType: string;
   segmentPointsMs: number[];
+  durationMs: number | null;
   blobUrl?: string;
 };
+
+function parseDurationMs(raw: unknown): number | null {
+  const n = Math.round(Number(raw));
+  if (!Number.isFinite(n) || n < 500) return null;
+  return Math.min(n, 30 * 60 * 1000);
+}
 
 export async function validateSongs(
   inputs: SongInput[],
@@ -106,6 +115,7 @@ export async function validateSongs(
     }
 
     const segmentPointsMs = normalizeSegmentPointsMs(input.segmentPointsMs);
+    let durationMs = parseDurationMs(input.durationMs);
 
     let buf: Buffer;
     let blobUrl: string | undefined;
@@ -116,8 +126,9 @@ export async function validateSongs(
         id: string;
         audio_data: Buffer;
         mime_type: string;
+        duration_ms: number | null;
       }>(
-        `select id, audio_data, mime_type from songs
+        `select id, audio_data, mime_type, duration_ms from songs
          where id = $1 and template_id = $2`,
         [input.keepSongId, templateId],
       );
@@ -132,6 +143,9 @@ export async function validateSongs(
         ? row.audio_data
         : Buffer.from(row.audio_data as unknown as ArrayBuffer);
       mimeType = row.mime_type || "audio/ogg";
+      if (durationMs == null && row.duration_ms != null) {
+        durationMs = parseDurationMs(row.duration_ms);
+      }
     } else if (input.blobUrl) {
       try {
         buf = await fetchPrivateBlobAudio(input.blobUrl);
@@ -209,6 +223,7 @@ export async function validateSongs(
       buf,
       mimeType,
       segmentPointsMs,
+      durationMs,
       blobUrl,
     });
   }
@@ -223,8 +238,8 @@ export async function insertSongsForTemplate(
   for (let i = 0; i < validated.length; i++) {
     const song = validated[i];
     await sql(
-      `insert into songs (id, template_id, display_name, mime_type, audio_data, sort_order, itunes_track_id, cover_art_url, artist_credit, itunes_answer_ids, answer_fingerprint, segment_points_ms)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+      `insert into songs (id, template_id, display_name, mime_type, audio_data, sort_order, itunes_track_id, cover_art_url, artist_credit, itunes_answer_ids, answer_fingerprint, segment_points_ms, duration_ms)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
       [
         newId(),
         templateId,
@@ -238,6 +253,7 @@ export async function insertSongsForTemplate(
         JSON.stringify(song.answerIds),
         JSON.stringify(song.fingerprints),
         JSON.stringify(song.segmentPointsMs),
+        song.durationMs,
       ],
     );
     if (song.blobUrl) await deleteBlobQuiet(song.blobUrl);

@@ -73,6 +73,7 @@ export async function POST(request: Request) {
         answerIds?: unknown;
         blobUrl?: string;
         segmentPointsMs?: unknown;
+        durationMs?: unknown;
       }>;
     } | null;
     const name = String(body?.name ?? "").trim().slice(0, 80);
@@ -89,6 +90,7 @@ export async function POST(request: Request) {
         : [],
       blobUrl: String(s.blobUrl ?? "").trim() || undefined,
       segmentPointsMs: s.segmentPointsMs,
+      durationMs: s.durationMs,
     }));
     const validated = await validateSongs(inputs);
     if (validated instanceof Response) return validated;
@@ -122,6 +124,7 @@ export async function POST(request: Request) {
   const itunesIds = form.getAll("itunesTrackIds").map((v) => String(v).trim());
   const answerIdBlobs = form.getAll("itunesAnswerIds");
   const segmentBlobs = form.getAll("segmentPointsMs");
+  const durationBlobs = form.getAll("durationMs");
   const files = form.getAll("songFiles");
 
   if (itunesIds.length === 0 || files.length === 0) {
@@ -142,6 +145,7 @@ export async function POST(request: Request) {
     answerIds: parseAnswerIds(answerIdBlobs[i], itunesTrackId),
     file: files[i] instanceof File ? files[i] : undefined,
     segmentPointsMs: segmentBlobs[i],
+    durationMs: durationBlobs[i],
   }));
 
   const validated = await validateSongs(inputs);

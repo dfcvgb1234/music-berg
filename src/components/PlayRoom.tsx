@@ -142,7 +142,7 @@ export function PlayRoom() {
                   ? ` · ${Math.min(state.currentSongIndex + 1, state.songCount)}/${state.songCount}`
                   : ""}
                 {state?.status === "playing"
-                  ? ` · ${formatClipSeconds(state.clipMs)}s · ${pointsForClip(state.clipMs, state.extendCount)} pts`
+                  ? ` · ${formatClipSeconds(state.clipMs)}s · ${state.pointsNow ?? pointsForClip(state.clipMs, state.extendCount)} pts`
                   : ""}
               </p>
               <h1 className="brand brand-md">
