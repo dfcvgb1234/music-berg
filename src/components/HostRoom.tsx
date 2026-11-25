@@ -70,11 +70,13 @@ export function HostRoom() {
 
       {finished ? (
         <div className="host-stage-body host-stage-finish">
-          <FinishScreen participants={state.participants} />
-          <div className="actions" style={{ justifyContent: "center" }}>
-            <Link className="btn" href="/host">
-              New quiz
-            </Link>
+          <div className="finish-wrap">
+            <FinishScreen participants={state.participants} />
+            <div className="actions finish-actions">
+              <Link className="btn" href="/host">
+                New quiz
+              </Link>
+            </div>
           </div>
         </div>
       ) : (

@@ -372,14 +372,32 @@ textarea {
 }
 
 .finish-screen {
-  width: min(720px, 100%);
+  width: 100%;
   margin: 0 auto;
-  padding: 0.5rem 0 2rem;
+  padding: 0.5rem 0 0;
+  display: grid;
+  justify-items: center;
+  text-align: center;
 }
 
 .finish-title {
   text-align: center;
   margin: 0 0 1.25rem;
+}
+
+.finish-wrap {
+  width: min(720px, 100%);
+  margin: 0 auto;
+  display: grid;
+  gap: 1.25rem;
+  justify-items: center;
+  text-align: center;
+}
+
+.finish-actions {
+  justify-content: center;
+  width: 100%;
+  margin: 0;
 }
 
 .finish-podium {
@@ -389,6 +407,7 @@ textarea {
   align-items: end;
   min-height: 11rem;
   margin-bottom: 1.5rem;
+  width: 100%;
 }
 
 .podium-slot {
@@ -473,9 +492,15 @@ textarea {
   outline: 1px solid rgba(200, 245, 96, 0.5);
 }
 
+.finish-full-list {
+  width: 100%;
+  text-align: left;
+}
+
 .finish-full-list h3 {
   margin: 0 0 0.65rem;
   font-family: var(--font-display);
+  text-align: center;
 }
 
 .clip-meter {
@@ -1221,9 +1246,19 @@ textarea {
 
 .host-stage-finish {
   display: grid;
+  grid-template-columns: 1fr;
   gap: 1.25rem;
   justify-items: center;
+  justify-content: center;
+  align-content: start;
   padding: 1rem 1.25rem 2.5rem;
+  width: 100%;
+}
+
+@media (min-width: 960px) {
+  .host-stage-body.host-stage-finish {
+    grid-template-columns: 1fr;
+  }
 }
 
 .host-score-panel h3 {
