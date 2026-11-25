@@ -22,6 +22,10 @@ export {
   clipMsForExpansions,
   expansionsForClip,
   formatClipSeconds,
+  nextClipMs,
   nextExtendDeltaMs,
+  nextExtendDeltaMsForTrack,
+  normalizeSegmentPointsMs,
   pointsForClip,
+  pointsForExtends,
 } from "@/lib/clipRules";

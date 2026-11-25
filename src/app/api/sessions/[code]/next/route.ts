@@ -39,6 +39,7 @@ export async function POST(
        set status = 'lobby',
            current_song_index = $2,
            clip_ms = $3,
+           extend_count = 0,
            play_started_at = null
        where id = $1`,
       [session.id, nextIndex, INITIAL_CLIP_MS],

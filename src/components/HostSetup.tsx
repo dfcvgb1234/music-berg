@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { CreateTrackListForm } from "@/components/CreateTrackListForm";
+import { readApiJson } from "@/lib/readApiJson";
 
 type TrackList = {
   id: string;
@@ -11,13 +12,17 @@ type TrackList = {
   songCount: number;
 };
 
+type Panel = "none" | "create" | "edit";
+
 export function HostSetup() {
   const router = useRouter();
   const [trackLists, setTrackLists] = useState<TrackList[]>([]);
   const [trackListId, setTrackListId] = useState("");
-  const [creating, setCreating] = useState(false);
+  const [panel, setPanel] = useState<Panel>("none");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [deleteSecret, setDeleteSecret] = useState("");
+  const [deleting, setDeleting] = useState(false);
 
   const loadLists = useCallback(async () => {
     const res = await fetch("/api/templates", { cache: "no-store" });
@@ -61,6 +66,34 @@ export function HostSetup() {
     }
   };
 
+  const onDelete = async () => {
+    if (!trackListId) return;
+    const list = trackLists.find((t) => t.id === trackListId);
+    const ok = window.confirm(
+      `Delete track list “${list?.name ?? trackListId}”? This also removes quiz sessions that used it.`,
+    );
+    if (!ok) return;
+    setDeleting(true);
+    setError(null);
+    try {
+      const headers: HeadersInit = {};
+      const secret = deleteSecret.trim();
+      if (secret) headers["x-upload-secret"] = secret;
+      const res = await fetch(
+        `/api/templates/${encodeURIComponent(trackListId)}`,
+        { method: "DELETE", headers },
+      );
+      const data = await readApiJson<{ error?: string }>(res);
+      if (!res.ok) throw new Error(data.error || "Could not delete");
+      setPanel("none");
+      await loadLists();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Delete failed");
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   return (
     <main className="shell">
       <div className="topbar">
@@ -82,7 +115,10 @@ export function HostSetup() {
               <select
                 id="track-list"
                 value={trackListId}
-                onChange={(e) => setTrackListId(e.target.value)}
+                onChange={(e) => {
+                  setTrackListId(e.target.value);
+                  if (panel === "edit") setPanel("none");
+                }}
                 required={trackLists.length > 0}
                 disabled={trackLists.length === 0}
               >
@@ -97,38 +133,99 @@ export function HostSetup() {
                 )}
               </select>
             </div>
-            <button
-              type="button"
-              className={`btn secondary${creating ? " is-active" : ""}`}
-              style={{ alignSelf: "end" }}
-              onClick={() => setCreating((v) => !v)}
-            >
-              {creating ? "Hide create" : "Create new track list"}
-            </button>
+            <div className="track-list-actions">
+              <button
+                type="button"
+                className={`btn secondary${panel === "create" ? " is-active" : ""}`}
+                onClick={() =>
+                  setPanel((p) => (p === "create" ? "none" : "create"))
+                }
+              >
+                {panel === "create" ? "Hide create" : "Create new"}
+              </button>
+              <button
+                type="button"
+                className={`btn secondary${panel === "edit" ? " is-active" : ""}`}
+                disabled={!trackListId}
+                onClick={() =>
+                  setPanel((p) => (p === "edit" ? "none" : "edit"))
+                }
+              >
+                {panel === "edit" ? "Hide edit" : "Edit"}
+              </button>
+            </div>
           </div>
+
+          {trackListId && (
+            <div className="field track-list-delete">
+              <label htmlFor="delete-secret">Upload secret (for delete)</label>
+              <div className="track-list-delete-row">
+                <input
+                  id="delete-secret"
+                  type="password"
+                  autoComplete="off"
+                  value={deleteSecret}
+                  onChange={(e) => setDeleteSecret(e.target.value)}
+                  placeholder="Same secret as create/edit"
+                />
+                <button
+                  type="button"
+                  className="btn danger"
+                  disabled={deleting || !trackListId}
+                  onClick={() => void onDelete()}
+                >
+                  {deleting ? "Deleting…" : "Delete list"}
+                </button>
+              </div>
+            </div>
+          )}
 
           <button
             className="btn"
             type="submit"
-            disabled={busy || !trackListId || creating}
+            disabled={busy || !trackListId || panel !== "none"}
           >
             {busy ? "Starting…" : "Create session"}
           </button>
           {error && <p className="error">{error}</p>}
         </form>
 
-        {creating && (
+        {panel === "create" && (
           <div className="surface stack" style={{ marginTop: "0.5rem" }}>
             <h2 style={{ margin: 0, fontSize: "1.15rem" }}>
               Create new track list
             </h2>
             <CreateTrackListForm
-              onCancel={() => setCreating(false)}
+              onCancel={() => setPanel("none")}
               onCreated={(list) => {
                 void (async () => {
                   await loadLists();
                   setTrackListId(list.id);
-                  setCreating(false);
+                  setPanel("none");
+                })();
+              }}
+            />
+          </div>
+        )}
+
+        {panel === "edit" && trackListId && (
+          <div className="surface stack" style={{ marginTop: "0.5rem" }}>
+            <h2 style={{ margin: 0, fontSize: "1.15rem" }}>
+              Edit track list
+            </h2>
+            <p className="muted" style={{ margin: 0 }}>
+              Enter the upload secret above in the form to load songs, then
+              adjust name, order, crop, or segment markers.
+            </p>
+            <CreateTrackListForm
+              key={trackListId}
+              editId={trackListId}
+              onCancel={() => setPanel("none")}
+              onCreated={(list) => {
+                void (async () => {
+                  await loadLists();
+                  setTrackListId(list.id);
+                  setPanel("none");
                 })();
               }}
             />

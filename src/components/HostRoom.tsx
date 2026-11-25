@@ -9,11 +9,7 @@ import {
   type HostVisualizerHandle,
 } from "@/components/HostVisualizer";
 import { Scoreboard } from "@/components/Scoreboard";
-import {
-  formatClipSeconds,
-  nextExtendDeltaMs,
-  pointsForClip,
-} from "@/lib/clipRules";
+import { formatClipSeconds, pointsForClip } from "@/lib/clipRules";
 import { useSessionStream } from "@/lib/useSessionStream";
 
 export function HostRoom() {
@@ -52,7 +48,9 @@ export function HostRoom() {
   }
 
   const pointsNow =
-    state?.status === "playing" ? pointsForClip(state.clipMs) : null;
+    state?.status === "playing"
+      ? pointsForClip(state.clipMs, state.extendCount)
+      : null;
   const finished = state?.status === "finished";
 
   return (
@@ -127,7 +125,14 @@ export function HostRoom() {
                     onClick={() => run("extend")}
                   >
                     Unlock +
-                    {formatClipSeconds(nextExtendDeltaMs(state.clipMs))}s
+                    {formatClipSeconds(
+                      state.nextExtendMs ??
+                        Math.max(0, 2000),
+                    )}
+                    s
+                    {state.segmentPointsMs?.length
+                      ? " (segment)"
+                      : ""}
                   </button>
                   <button
                     className="btn secondary"
