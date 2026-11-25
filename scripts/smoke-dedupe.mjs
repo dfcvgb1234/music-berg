@@ -1,5 +1,5 @@
 /**
- * Quick smoke test for title normalize + live iTunes collapse.
+ * Quick smoke test for title normalize + live Deezer collapse.
  */
 
 function normalizeTitle(title) {
@@ -64,33 +64,34 @@ for (const [a, b] of shouldDiffer) {
 }
 
 const url =
-  "https://itunes.apple.com/search?" +
+  "https://api.deezer.com/search?" +
   new URLSearchParams({
-    term: "bohemian rhapsody queen",
-    entity: "song",
-    country: "DK",
+    q: "bohemian rhapsody queen",
     limit: "40",
   }).toString();
 
 const res = await fetch(url, { headers: { Accept: "application/json" } });
 if (!res.ok) {
-  console.error("iTunes search failed", res.status);
+  console.error("Deezer search failed", res.status);
   process.exit(1);
 }
 const data = await res.json();
 const groups = new Map();
-for (const row of data.results ?? []) {
-  if (!row.trackId || !row.trackName) continue;
-  const key = trackFingerprint(row.artistName || "", row.trackName);
+for (const row of data.data ?? []) {
+  if (row.readable === false) continue;
+  if (!row.preview || !row.id) continue;
+  const title = row.title_short || row.title;
+  if (!title) continue;
+  const key = trackFingerprint(row.artist?.name || "", title);
   if (key.endsWith("|") || !key.includes("|")) continue;
   const list = groups.get(key) ?? [];
-  list.push({ id: row.trackId, title: row.trackName, album: row.collectionName });
+  list.push({ id: row.id, title, album: row.album?.title });
   groups.set(key, list);
 }
 
 const multi = [...groups.entries()].filter(([, v]) => v.length > 1);
 console.log(
-  `iTunes raw=${data.resultCount} groups=${groups.size} withVariants=${multi.length}`,
+  `Deezer raw=${data.total ?? (data.data ?? []).length} groups=${groups.size} withVariants=${multi.length}`,
 );
 if (multi[0]) {
   console.log("sample group:", multi[0][0], multi[0][1].slice(0, 4));

@@ -18,11 +18,11 @@ import {
   getTrack,
   getTracks,
   trackFingerprint,
-} from "@/lib/itunes";
+} from "@/lib/deezer";
 import { clientKey, rateLimit } from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
-/** Allow ffmpeg/iTunes work during multi-MP3 create on Vercel. */
+/** Allow ffmpeg/Deezer work during multi-MP3 create on Vercel. */
 export const maxDuration = 60;
 
 type TemplateRow = {

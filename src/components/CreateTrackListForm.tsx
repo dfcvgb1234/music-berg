@@ -132,7 +132,7 @@ export function CreateTrackListForm({
           ? ` (+${incomplete.missingPick.length - 8} more)`
           : "";
       reasons.push(
-        `Pick an iTunes track for song${incomplete.missingPick.length === 1 ? "" : "s"} ${list}${more}.`,
+        `Pick a Deezer track for song${incomplete.missingPick.length === 1 ? "" : "s"} ${list}${more}.`,
       );
     }
     if (incomplete.missingAudio.length) {
@@ -280,7 +280,7 @@ export function CreateTrackListForm({
 
   const songStatus = (song: SongDraft) => {
     if (!song.pick && !song.audio?.file) return "Needs track + Opus convert";
-    if (!song.pick) return "Needs iTunes track pick";
+    if (!song.pick) return "Needs Deezer track pick";
     if (!song.audio?.file) return "Needs Convert to Opus";
     if (song.audio.file.size > uploadLimits.maxFileBytes) {
       return `Encoded file too large (${formatBytes(song.audio.file.size)})`;
