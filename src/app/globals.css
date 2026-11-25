@@ -371,6 +371,113 @@ textarea {
   font-variant-numeric: tabular-nums;
 }
 
+.finish-screen {
+  width: min(720px, 100%);
+  margin: 0 auto;
+  padding: 0.5rem 0 2rem;
+}
+
+.finish-title {
+  text-align: center;
+  margin: 0 0 1.25rem;
+}
+
+.finish-podium {
+  display: grid;
+  grid-template-columns: 1fr 1.15fr 1fr;
+  gap: 0.65rem;
+  align-items: end;
+  min-height: 11rem;
+  margin-bottom: 1.5rem;
+}
+
+.podium-slot {
+  display: grid;
+  justify-items: center;
+  gap: 0.35rem;
+  text-align: center;
+}
+
+.podium-slot.is-empty {
+  visibility: hidden;
+}
+
+.podium-place {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 1.1rem;
+  color: var(--steel);
+}
+
+.podium-1 .podium-place {
+  color: var(--lime);
+  font-size: 1.35rem;
+}
+
+.podium-2 .podium-place {
+  color: var(--mint);
+}
+
+.podium-3 .podium-place {
+  color: var(--coral);
+}
+
+.podium-name {
+  font-weight: 600;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 0.25rem;
+}
+
+.podium-score {
+  font-variant-numeric: tabular-nums;
+  color: var(--lime);
+  font-weight: 700;
+}
+
+.podium-block {
+  width: 100%;
+  border-radius: 12px 12px 4px 4px;
+  background: linear-gradient(
+    180deg,
+    rgba(125, 255, 179, 0.22),
+    rgba(7, 20, 26, 0.55)
+  );
+  border: 1px solid var(--line);
+}
+
+.podium-1 .podium-block {
+  height: 7.5rem;
+  background: linear-gradient(
+    180deg,
+    rgba(200, 245, 96, 0.35),
+    rgba(7, 20, 26, 0.55)
+  );
+}
+
+.podium-2 .podium-block {
+  height: 5.25rem;
+}
+
+.podium-3 .podium-block {
+  height: 3.75rem;
+}
+
+.podium-slot.is-me .podium-name {
+  color: var(--foam);
+}
+
+.podium-slot.is-me .podium-block {
+  outline: 1px solid rgba(200, 245, 96, 0.5);
+}
+
+.finish-full-list h3 {
+  margin: 0 0 0.65rem;
+  font-family: var(--font-display);
+}
+
 .clip-meter {
   height: 8px;
   border-radius: 999px;
@@ -1036,6 +1143,13 @@ textarea {
   align-self: stretch;
   max-height: min(78svh, 760px);
   overflow: auto;
+}
+
+.host-stage-finish {
+  display: grid;
+  gap: 1.25rem;
+  justify-items: center;
+  padding: 1rem 1.25rem 2.5rem;
 }
 
 .host-score-panel h3 {

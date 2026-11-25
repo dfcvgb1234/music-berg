@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
+import { FinishScreen } from "@/components/FinishScreen";
 import { TrackPicker, type PickedTrack } from "@/components/TrackPicker";
 import { Scoreboard } from "@/components/Scoreboard";
 import { formatClipSeconds, pointsForClip } from "@/lib/clipRules";
@@ -113,6 +114,7 @@ export function PlayRoom() {
     me &&
     !me.guessedCorrect &&
     !me.lockedOut;
+  const finished = state?.status === "finished";
 
   return (
     <main className="shell">
@@ -125,93 +127,105 @@ export function PlayRoom() {
         </span>
       </div>
 
-      <div className="layout-split">
-        <section className="stack">
-          <div>
-            <p className="muted" style={{ margin: 0 }}>
-              {code}
-              {state
-                ? ` · ${Math.min(state.currentSongIndex + 1, state.songCount)}/${state.songCount}`
-                : ""}
-              {state?.status === "playing"
-                ? ` · ${formatClipSeconds(state.clipMs)}s · ${pointsForClip(state.clipMs)} pts`
-                : ""}
-            </p>
-            <h1 className="brand brand-md">
-              {state?.status === "finished"
-                ? "Finished"
-                : state?.status === "playing"
+      {finished ? (
+        <FinishScreen
+          participants={state.participants}
+          highlightId={player.participantId}
+        />
+      ) : (
+        <div className="layout-split">
+          <section className="stack">
+            <div>
+              <p className="muted" style={{ margin: 0 }}>
+                {code}
+                {state
+                  ? ` · ${Math.min(state.currentSongIndex + 1, state.songCount)}/${state.songCount}`
+                  : ""}
+                {state?.status === "playing"
+                  ? ` · ${formatClipSeconds(state.clipMs)}s · ${pointsForClip(state.clipMs)} pts`
+                  : ""}
+              </p>
+              <h1 className="brand brand-md">
+                {state?.status === "playing"
                   ? "Guess"
                   : state?.status === "revealed"
                     ? "Revealed"
                     : "Waiting"}
-            </h1>
-          </div>
+              </h1>
+            </div>
 
-          <div className="surface stack">
-            {state?.status === "playing" && (
-              <div className="wave" aria-hidden>
-                <i /><i /><i /><i /><i />
-              </div>
-            )}
+            <div className="surface stack">
+              {state?.status === "playing" && (
+                <div className="wave" aria-hidden>
+                  <i /><i /><i /><i /><i />
+                </div>
+              )}
 
-            {state?.currentSongName && (
-              <div className="reveal-card">
-                {state.currentCoverArtUrl && (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={state.currentCoverArtUrl}
-                    alt=""
-                    className="reveal-card-cover"
-                    referrerPolicy="no-referrer"
+              {state?.currentSongName && (
+                <div className="reveal-card">
+                  {state.currentCoverArtUrl && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={state.currentCoverArtUrl}
+                      alt=""
+                      className="reveal-card-cover"
+                      referrerPolicy="no-referrer"
+                    />
+                  )}
+                  <p className="ok-msg" style={{ margin: 0 }}>
+                    {state.currentSongName}
+                  </p>
+                </div>
+              )}
+
+              {canGuess ? (
+                <form className="guess-form guess-track" onSubmit={onGuess}>
+                  <TrackPicker
+                    id="guess-itunes"
+                    label="Guess"
+                    value={pick}
+                    onChange={setPick}
+                    placeholder="Search…"
                   />
-                )}
-                <p className="ok-msg" style={{ margin: 0 }}>
-                  {state.currentSongName}
-                </p>
-              </div>
-            )}
+                  <button
+                    className="btn"
+                    type="submit"
+                    disabled={busy || !pick}
+                  >
+                    Lock guess
+                  </button>
+                </form>
+              ) : me?.guessedCorrect ? (
+                <p className="ok-msg">Correct</p>
+              ) : me?.lockedOut ? (
+                <p className="error">Locked out</p>
+              ) : null}
 
-            {canGuess ? (
-              <form className="guess-form guess-track" onSubmit={onGuess}>
-                <TrackPicker
-                  id="guess-itunes"
-                  label="Guess"
-                  value={pick}
-                  onChange={setPick}
-                  placeholder="Search…"
-                />
-                <button
-                  className="btn"
-                  type="submit"
-                  disabled={busy || !pick}
+              {feedback && (
+                <p
+                  className={
+                    feedback.startsWith("Wrong") ||
+                    feedback.startsWith("No more")
+                      ? "error"
+                      : "ok-msg"
+                  }
                 >
-                  Lock guess
-                </button>
-              </form>
-            ) : me?.guessedCorrect ? (
-              <p className="ok-msg">Correct</p>
-            ) : me?.lockedOut ? (
-              <p className="error">Locked out</p>
-            ) : null}
+                  {feedback}
+                </p>
+              )}
+              {error && <p className="error">{error}</p>}
+            </div>
+          </section>
 
-            {feedback && (
-              <p className={feedback.startsWith("Wrong") || feedback.startsWith("No more") ? "error" : "ok-msg"}>
-                {feedback}
-              </p>
-            )}
-            {error && <p className="error">{error}</p>}
-          </div>
-        </section>
-
-        <aside className="surface">
-          <h3>Scores</h3>
-          <Scoreboard
-            participants={state?.participants ?? []}
-            highlightId={player.participantId}
-          />
-        </aside>
-      </div>
+          <aside className="surface">
+            <h3>Scores</h3>
+            <Scoreboard
+              participants={state?.participants ?? []}
+              highlightId={player.participantId}
+            />
+          </aside>
+        </div>
+      )}
     </main>
   );
 }

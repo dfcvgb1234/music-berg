@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { FinishScreen } from "@/components/FinishScreen";
 import {
   HostVisualizer,
   type HostVisualizerHandle,
@@ -52,6 +53,7 @@ export function HostRoom() {
 
   const pointsNow =
     state?.status === "playing" ? pointsForClip(state.clipMs) : null;
+  const finished = state?.status === "finished";
 
   return (
     <main className="host-stage">
@@ -66,43 +68,51 @@ export function HostRoom() {
         <span className="badge">{connected ? "Live" : "Reconnecting…"}</span>
       </header>
 
-      <div className="host-stage-body">
-        <section className="host-stage-center">
-          {state && (
-            <>
-              <p className="host-round-meta">
-                {state.templateName} · Song{" "}
-                {Math.min(state.currentSongIndex + 1, state.songCount)} /{" "}
-                {state.songCount}
-                {state.status === "finished" ? " · finished" : ""}
-                {pointsNow != null ? ` · ${pointsNow} pts` : ""}
-              </p>
-
-              {state.revealAnswer && state.currentSongName && (
-                <p className="ok-msg host-track-name">
-                  Revealed: {state.currentSongName}
+      {finished ? (
+        <div className="host-stage-body host-stage-finish">
+          <FinishScreen participants={state.participants} />
+          <div className="actions" style={{ justifyContent: "center" }}>
+            <Link className="btn" href="/host">
+              New quiz
+            </Link>
+          </div>
+        </div>
+      ) : (
+        <div className="host-stage-body">
+          <section className="host-stage-center">
+            {state && (
+              <>
+                <p className="host-round-meta">
+                  {state.templateName} · Song{" "}
+                  {Math.min(state.currentSongIndex + 1, state.songCount)} /{" "}
+                  {state.songCount}
+                  {pointsNow != null ? ` · ${pointsNow} pts` : ""}
                 </p>
-              )}
 
-              <HostVisualizer
-                ref={vizRef}
-                code={code}
-                songId={state.currentSongId}
-                clipMs={state.clipMs}
-                playToken={state.playToken}
-                active={
-                  state.status === "playing" || state.status === "revealed"
-                }
-                revealed={state.status === "revealed"}
-                coverArtUrl={state.currentCoverArtUrl}
-                hostToken={hostToken}
-                busy={busy}
-                onState={setState}
-                onBusy={setBusy}
-                onError={setError}
-              />
+                {state.revealAnswer && state.currentSongName && (
+                  <p className="ok-msg host-track-name">
+                    Revealed: {state.currentSongName}
+                  </p>
+                )}
 
-              {state.status !== "finished" && (
+                <HostVisualizer
+                  ref={vizRef}
+                  code={code}
+                  songId={state.currentSongId}
+                  clipMs={state.clipMs}
+                  playToken={state.playToken}
+                  active={
+                    state.status === "playing" || state.status === "revealed"
+                  }
+                  revealed={state.status === "revealed"}
+                  coverArtUrl={state.currentCoverArtUrl}
+                  hostToken={hostToken}
+                  busy={busy}
+                  onState={setState}
+                  onBusy={setBusy}
+                  onError={setError}
+                />
+
                 <div className="host-controls">
                   <button
                     className="btn host-ctrl-primary"
@@ -136,21 +146,21 @@ export function HostRoom() {
                       : "Next song"}
                   </button>
                 </div>
-              )}
 
-              {state.everyoneCorrect && state.status === "playing" && (
-                <p className="ok-msg">Everyone got it</p>
-              )}
-            </>
-          )}
-          {error && <p className="error">{error}</p>}
-        </section>
+                {state.everyoneCorrect && state.status === "playing" && (
+                  <p className="ok-msg">Everyone got it</p>
+                )}
+              </>
+            )}
+            {error && <p className="error">{error}</p>}
+          </section>
 
-        <aside className="host-score-panel">
-          <h3>Scores</h3>
-          <Scoreboard participants={state?.participants ?? []} />
-        </aside>
-      </div>
+          <aside className="host-score-panel">
+            <h3>Scores</h3>
+            <Scoreboard participants={state?.participants ?? []} />
+          </aside>
+        </div>
+      )}
     </main>
   );
 }
