@@ -1,6 +1,6 @@
 "use client";
 
-import { OPUS_BITRATE, OPUS_EXT, OPUS_MIME } from "@/lib/audioMime";
+import { OPUS_BITRATE } from "@/lib/audioMime";
 
 export type EncodeProgress = {
   phase: "loading" | "encoding" | "done" | "error";
@@ -40,10 +40,13 @@ type FFmpegLike = {
 declare global {
   interface Window {
     FFmpegWASM?: { FFmpeg: new () => FFmpegLike };
+    webkitAudioContext?: typeof AudioContext;
   }
 }
 
 const LOG_TAG = "[bergs-music:opus]";
+/** Target rate for crop WAV + Opus (Opus-native). */
+const TARGET_RATE = 48000;
 
 function opusLog(...args: unknown[]) {
   console.log(LOG_TAG, ...args);
@@ -71,6 +74,12 @@ export function formatUnknownError(err: unknown): string {
   return String(err);
 }
 
+function isMemoryError(msg: string): boolean {
+  return /memory access out of bounds|out of bounds|OOM|out of memory|Cannot enlarge memory|Aborted/i.test(
+    msg,
+  );
+}
+
 let ffmpegSingleton: FFmpegLike | null = null;
 let loadPromise: Promise<FFmpegLike> | null = null;
 let scriptPromise: Promise<void> | null = null;
@@ -90,11 +99,6 @@ function toTransferableBytes(data: Uint8Array): Uint8Array {
   const copy = new Uint8Array(ab);
   copy.set(data);
   return copy;
-}
-
-async function fetchFileBytes(file: File | Blob): Promise<Uint8Array> {
-  const buf = await file.arrayBuffer();
-  return toTransferableBytes(new Uint8Array(buf));
 }
 
 async function toBlobURL(url: string, mimeType: string): Promise<string> {
@@ -175,6 +179,7 @@ function resetFfmpegSingleton(reason: string) {
 /**
  * Load ffmpeg.wasm once (UMD + core from /public/ffmpeg via postinstall).
  * Single-thread core — no SharedArrayBuffer / COOP-COEP required.
+ * Heap size is fixed in the shipped wasm (not configurable via load()).
  */
 export async function getFfmpeg(
   onProgress?: (p: EncodeProgress) => void,
@@ -191,12 +196,15 @@ export async function getFfmpeg(
     const ffmpeg = new window.FFmpegWASM!.FFmpeg();
     ffmpeg.on("log", ({ type, message }) => {
       if (typeof message !== "string") return;
-      // Emscripten prints "Aborted()" on normal process exit — not a real failure.
       if (/^Aborted\(\)$/i.test(message.trim())) {
         opusLog(type || "ff", message);
         return;
       }
-      if (/error|fail|invalid|unknown encoder|does not|could not/i.test(message)) {
+      if (
+        /error|fail|invalid|unknown encoder|does not|could not|out of bounds|memory/i.test(
+          message,
+        )
+      ) {
         opusWarn(type || "ff", message);
       } else {
         opusLog(type || "ff", message);
@@ -266,20 +274,111 @@ export async function getFfmpeg(
   return loadPromise;
 }
 
-function inputFilenameFor(source: File | Blob): string {
-  const name =
-    source instanceof File ? source.name.toLowerCase() : "source.mp3";
-  if (name.endsWith(".wav")) return "input.wav";
-  if (name.endsWith(".m4a") || name.endsWith(".mp4") || name.endsWith(".aac")) {
-    return "input.m4a";
+function makeAudioContext(sampleRate?: number): AudioContext {
+  const Ctor = window.AudioContext || window.webkitAudioContext;
+  if (!Ctor) throw new Error("Web Audio API unavailable");
+  return sampleRate ? new Ctor({ sampleRate }) : new Ctor();
+}
+
+/**
+ * Decode source in the browser, crop, downmix to mono @ 48 kHz.
+ * Avoids feeding large stereo/ID3 MP3s into the tiny ffmpeg.wasm heap.
+ */
+async function decodeCropMono(
+  source: File | Blob,
+  crop: CropRange,
+  onProgress?: (p: EncodeProgress) => void,
+): Promise<AudioBuffer> {
+  onProgress?.({
+    phase: "encoding",
+    ratio: 0.02,
+    message: "Decoding audio in browser…",
+  });
+  const raw = await source.arrayBuffer();
+  // Copy — decodeAudioData may detach the buffer.
+  const copy = raw.slice(0);
+  const ctx = makeAudioContext();
+  try {
+    const decoded = await ctx.decodeAudioData(copy);
+    const start = Math.max(0, Math.min(crop.startSec, decoded.duration));
+    const end = Math.max(
+      start + 0.25,
+      Math.min(crop.endSec, decoded.duration),
+    );
+    const duration = end - start;
+    const offline = new OfflineAudioContext(
+      1,
+      Math.max(1, Math.ceil(duration * TARGET_RATE)),
+      TARGET_RATE,
+    );
+    const src = offline.createBufferSource();
+    src.buffer = decoded;
+    // Downmix: OfflineAudioContext with 1 channel mixes inputs to mono.
+    src.connect(offline.destination);
+    src.start(0, start, duration);
+    const rendered = await offline.startRendering();
+    opusLog("webaudio crop", {
+      sourceChannels: decoded.numberOfChannels,
+      sourceRate: decoded.sampleRate,
+      sourceDuration: decoded.duration,
+      cropStart: start,
+      cropEnd: end,
+      outFrames: rendered.length,
+      outRate: rendered.sampleRate,
+    });
+    return rendered;
+  } finally {
+    void ctx.close().catch(() => undefined);
   }
-  if (name.endsWith(".ogg") || name.endsWith(".oga") || name.endsWith(".opus")) {
-    return "input.ogg";
+}
+
+/** 16-bit mono PCM WAV — small enough for ffmpeg MEMFS. */
+function audioBufferToWav(buffer: AudioBuffer): Uint8Array {
+  const numChannels = 1;
+  const sampleRate = buffer.sampleRate;
+  const samples = buffer.getChannelData(0);
+  const dataSize = samples.length * 2;
+  const out = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(out);
+
+  const writeStr = (offset: number, s: string) => {
+    for (let i = 0; i < s.length; i++) view.setUint8(offset + i, s.charCodeAt(i));
+  };
+  writeStr(0, "RIFF");
+  view.setUint32(4, 36 + dataSize, true);
+  writeStr(8, "WAVE");
+  writeStr(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true); // PCM
+  view.setUint16(22, numChannels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * numChannels * 2, true);
+  view.setUint16(32, numChannels * 2, true);
+  view.setUint16(34, 16, true);
+  writeStr(36, "data");
+  view.setUint32(40, dataSize, true);
+
+  let offset = 44;
+  for (let i = 0; i < samples.length; i++) {
+    const s = Math.max(-1, Math.min(1, samples[i]));
+    view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+    offset += 2;
   }
-  if (name.endsWith(".webm")) return "input.webm";
-  if (name.endsWith(".flac")) return "input.flac";
-  // Default: mp3 (most quiz uploads); ffmpeg also sniffs content.
-  return "input.mp3";
+  return new Uint8Array(out);
+}
+
+function fileFromBytes(
+  bytes: Uint8Array,
+  base: string,
+  ext: string,
+  mime: string,
+): File {
+  const copy = toTransferableBytes(bytes);
+  const blob = new Blob([copy as BlobPart], { type: mime });
+  return new File([blob], `${base}${ext}`, {
+    type: mime,
+    lastModified: Date.now(),
+  });
 }
 
 type EncodeAttempt = {
@@ -290,54 +389,47 @@ type EncodeAttempt = {
   args: string[];
 };
 
-function buildAttempts(
-  inName: string,
-  start: number,
-  duration: number,
-): EncodeAttempt[] {
-  const ss = start.toFixed(3);
-  const t = duration.toFixed(3);
-  // Prefer libopus → Ogg (browser <audio> friendly). Explicit 48 kHz (Opus native).
+/** Safe encodes from a tiny mono WAV already cropped in JS. */
+function buildWavAttempts(inName: string): EncodeAttempt[] {
+  const common = [
+    "-i",
+    inName,
+    "-vn",
+    "-map_metadata",
+    "-1",
+    "-map_chapters",
+    "-1",
+    "-ac",
+    "1",
+    "-ar",
+    String(TARGET_RATE),
+  ];
   return [
     {
-      label: "libopus/ogg@48k",
+      label: "wav→libopus/ogg mono",
       outName: "out.ogg",
       mime: "audio/ogg",
       ext: ".ogg",
       args: [
-        "-i",
-        inName,
-        "-ss",
-        ss,
-        "-t",
-        t,
-        "-vn",
-        "-ar",
-        "48000",
+        ...common,
         "-c:a",
         "libopus",
         "-b:a",
         OPUS_BITRATE,
         "-application",
         "audio",
+        "-vbr",
+        "on",
         "out.ogg",
       ],
     },
     {
-      label: "libopus/webm@48k",
+      label: "wav→libopus/webm mono",
       outName: "out.webm",
       mime: "audio/webm",
       ext: ".webm",
       args: [
-        "-i",
-        inName,
-        "-ss",
-        ss,
-        "-t",
-        t,
-        "-vn",
-        "-ar",
-        "48000",
+        ...common,
         "-c:a",
         "libopus",
         "-b:a",
@@ -346,28 +438,205 @@ function buildAttempts(
       ],
     },
     {
-      label: "opus/ogg@48k",
-      outName: "out2.ogg",
-      mime: "audio/ogg",
-      ext: ".ogg",
+      label: "wav→libmp3lame",
+      outName: "out.mp3",
+      mime: "audio/mpeg",
+      ext: ".mp3",
       args: [
-        "-i",
-        inName,
-        "-ss",
-        ss,
-        "-t",
-        t,
-        "-vn",
-        "-ar",
-        "48000",
+        ...common,
         "-c:a",
-        "opus",
+        "libmp3lame",
         "-b:a",
         OPUS_BITRATE,
-        "out2.ogg",
+        "out.mp3",
       ],
     },
   ];
+}
+
+/**
+ * MediaRecorder Opus fallback — no wasm heap.
+ * Plays the crop through a MediaStreamDestination and records webm/opus.
+ */
+async function encodeViaMediaRecorder(
+  buffer: AudioBuffer,
+  base: string,
+  onProgress?: (p: EncodeProgress) => void,
+): Promise<File> {
+  onProgress?.({
+    phase: "encoding",
+    ratio: 0.4,
+    message: "Fallback: browser Opus recorder…",
+  });
+
+  const mimeCandidates = [
+    "audio/webm;codecs=opus",
+    "audio/webm",
+    "audio/ogg;codecs=opus",
+  ];
+  const mime =
+    mimeCandidates.find((m) => {
+      try {
+        return (
+          typeof MediaRecorder !== "undefined" &&
+          MediaRecorder.isTypeSupported(m)
+        );
+      } catch {
+        return false;
+      }
+    }) ?? "";
+  if (!mime) {
+    throw new Error("MediaRecorder Opus/WebM not supported in this browser");
+  }
+
+  const ctx = makeAudioContext(buffer.sampleRate);
+  const dest = ctx.createMediaStreamDestination();
+  const src = ctx.createBufferSource();
+  src.buffer = buffer;
+  src.connect(dest);
+
+  const chunks: BlobPart[] = [];
+  const recorder = new MediaRecorder(dest.stream, {
+    mimeType: mime,
+    audioBitsPerSecond: 96_000,
+  });
+  recorder.ondataavailable = (ev) => {
+    if (ev.data.size > 0) chunks.push(ev.data);
+  };
+
+  const done = new Promise<Blob>((resolve, reject) => {
+    recorder.onerror = () => reject(new Error("MediaRecorder failed"));
+    recorder.onstop = () => {
+      resolve(new Blob(chunks, { type: mime.startsWith("audio/ogg") ? "audio/ogg" : "audio/webm" }));
+    };
+  });
+
+  try {
+    if (ctx.state === "suspended") await ctx.resume();
+    recorder.start(200);
+    src.start(0);
+    await new Promise<void>((resolve) => {
+      src.onended = () => resolve();
+      // Safety: duration + slack
+      window.setTimeout(
+        resolve,
+        Math.ceil((buffer.duration + 0.35) * 1000),
+      );
+    });
+    if (recorder.state !== "inactive") recorder.stop();
+    const blob = await done;
+    if (blob.size < 64) throw new Error("MediaRecorder produced empty output");
+    const ext = blob.type.includes("ogg") ? ".ogg" : ".webm";
+    const file = new File([blob], `${base}${ext}`, {
+      type: blob.type || "audio/webm",
+      lastModified: Date.now(),
+    });
+    opusLog("mediarecorder ok", { bytes: file.size, type: file.type });
+    return file;
+  } finally {
+    try {
+      if (recorder.state !== "inactive") recorder.stop();
+    } catch {
+      /* ignore */
+    }
+    src.disconnect();
+    void ctx.close().catch(() => undefined);
+  }
+}
+
+async function encodeWavWithFfmpeg(
+  wav: Uint8Array,
+  base: string,
+  onProgress?: (p: EncodeProgress) => void,
+): Promise<File> {
+  const ffmpeg = await getFfmpeg(onProgress);
+  const inName = "crop.wav";
+  const logLines: string[] = [];
+  const onLog = ({ message }: { message?: string }) => {
+    if (typeof message === "string" && message.trim()) {
+      logLines.push(message);
+      if (logLines.length > 200) logLines.splice(0, logLines.length - 200);
+    }
+  };
+  ffmpeg.on("log", onLog);
+
+  const recentLogs = () =>
+    logLines
+      .filter((l) => !/^ffmpeg version|^configuration:|^  built with/i.test(l))
+      .slice(-10)
+      .join(" | ");
+
+  try {
+    for (const name of [inName, "out.ogg", "out.webm", "out.mp3"]) {
+      try {
+        await ffmpeg.deleteFile(name);
+      } catch {
+        /* ignore */
+      }
+    }
+
+    opusLog("writeFile crop wav", { bytes: wav.byteLength });
+    await ffmpeg.writeFile(inName, toTransferableBytes(wav));
+
+    let lastErr = "";
+    for (const attempt of buildWavAttempts(inName)) {
+      try {
+        opusLog("exec", attempt.label, attempt.args.join(" "));
+        onProgress?.({
+          phase: "encoding",
+          ratio: 0.35,
+          message: `Encoding (${attempt.label})…`,
+        });
+        try {
+          await ffmpeg.deleteFile(attempt.outName);
+        } catch {
+          /* ignore */
+        }
+        const code = await ffmpeg.exec(attempt.args);
+        if (code !== 0) {
+          lastErr = `ffmpeg exit ${code} [${attempt.label}] ${recentLogs()}`;
+          opusWarn(lastErr);
+          if (isMemoryError(lastErr)) {
+            resetFfmpegSingleton("wasm OOB during exec");
+            throw new Error(lastErr);
+          }
+          continue;
+        }
+        const data = await ffmpeg.readFile(attempt.outName);
+        if (!(data instanceof Uint8Array) || data.byteLength < 64) {
+          lastErr = `empty output [${attempt.label}]`;
+          continue;
+        }
+        const file = fileFromBytes(
+          data,
+          base,
+          attempt.ext,
+          attempt.mime,
+        );
+        opusLog("ffmpeg encode ok", {
+          label: attempt.label,
+          bytes: file.size,
+          mime: attempt.mime,
+        });
+        return file;
+      } catch (err) {
+        lastErr = `${attempt.label}: ${formatUnknownError(err)} // ${recentLogs()}`;
+        opusError("exec failed", lastErr, err);
+        if (isMemoryError(formatUnknownError(err))) {
+          resetFfmpegSingleton("wasm memory error");
+          throw new Error(lastErr);
+        }
+      }
+    }
+    throw new Error(lastErr || "All ffmpeg encode attempts failed");
+  } finally {
+    ffmpeg.off?.("log", onLog);
+    try {
+      await ffmpeg.deleteFile(inName);
+    } catch {
+      /* ignore */
+    }
+  }
 }
 
 export async function encodeOpusCrop(
@@ -377,151 +646,86 @@ export async function encodeOpusCrop(
 ): Promise<File> {
   const start = Math.max(0, crop.startSec);
   const end = Math.max(start + 0.25, crop.endSec);
-  const duration = end - start;
-  const inName = inputFilenameFor(source);
+  const base =
+    source instanceof File
+      ? source.name.replace(/\.[^.]+$/, "") || "clip"
+      : "clip";
 
-  const ffmpeg = await getFfmpeg(onProgress);
-  onProgress?.({
-    phase: "encoding",
-    ratio: 0,
-    message: "Encoding Opus at 96 kbps…",
-  });
-
-  const logLines: string[] = [];
-  const onLog = ({ message }: { message?: string }) => {
-    if (typeof message === "string" && message.trim()) {
-      logLines.push(message);
-      // Cap memory — keep a rolling window for the error report.
-      if (logLines.length > 200) logLines.splice(0, logLines.length - 200);
-    }
-  };
-  ffmpeg.on("log", onLog);
-
-  const recentLogs = () =>
-    logLines
-      .filter((l) => !/^ffmpeg version|^configuration:|^  built with/i.test(l))
-      .slice(-12)
-      .join(" | ");
+  const errors: string[] = [];
 
   try {
-    // Clean slate for this encode (previous run may have left files / detached bufs).
-    for (const name of [
-      inName,
-      "out.ogg",
-      "out.webm",
-      "out2.ogg",
-      "input_src",
-      `out${OPUS_EXT}`,
-    ]) {
-      try {
-        await ffmpeg.deleteFile(name);
-      } catch {
-        /* missing is fine */
-      }
-    }
-
-    const bytes = await fetchFileBytes(source);
-    opusLog("writeFile", {
-      inName,
-      bytes: bytes.byteLength,
-      start,
-      duration,
-      sourceType: source instanceof File ? source.type : "(blob)",
-      sourceName: source instanceof File ? source.name : "(blob)",
+    onProgress?.({
+      phase: "encoding",
+      ratio: 0,
+      message: "Preparing crop…",
     });
-    await ffmpeg.writeFile(inName, bytes);
 
-    const attempts = buildAttempts(inName, start, duration);
-    let lastErr = "";
+    // 1) Browser decode + mono crop → tiny WAV (avoids stereo/ID3 OOB in wasm).
+    const mono = await decodeCropMono(
+      source,
+      { startSec: start, endSec: end },
+      onProgress,
+    );
+    const wav = audioBufferToWav(mono);
+    opusLog("crop wav ready", {
+      wavBytes: wav.byteLength,
+      duration: mono.duration,
+      frames: mono.length,
+    });
 
-    for (const attempt of attempts) {
-      const beforeLen = logLines.length;
-      try {
-        opusLog("exec", attempt.label, attempt.args.join(" "));
-        onProgress?.({
-          phase: "encoding",
-          ratio: 0.05,
-          message: `Encoding (${attempt.label})…`,
-        });
-        try {
-          await ffmpeg.deleteFile(attempt.outName);
-        } catch {
-          /* ignore */
-        }
-
-        const code = await ffmpeg.exec(attempt.args);
-        const attemptLogs = logLines.slice(beforeLen);
-        const useful = attemptLogs
-          .filter((l) =>
-            /error|fail|invalid|unknown encoder|could not|does not|Conversion/i.test(
-              l,
-            ),
-          )
-          .slice(-6);
-        if (code !== 0) {
-          lastErr = `ffmpeg exit ${code} [${attempt.label}] ${useful.join(" | ") || recentLogs()}`;
-          opusWarn(lastErr);
-          continue;
-        }
-
-        const data = await ffmpeg.readFile(attempt.outName);
-        if (!(data instanceof Uint8Array) || data.byteLength < 64) {
-          lastErr = `empty output [${attempt.label}]`;
-          opusWarn(lastErr);
-          continue;
-        }
-
-        // Copy out before any further FS ops (worker may reuse buffers).
-        const copy = toTransferableBytes(data);
-        const blob = new Blob([copy as BlobPart], {
-          type: attempt.mime,
-        });
-        const base =
-          source instanceof File
-            ? source.name.replace(/\.[^.]+$/, "") || "clip"
-            : "clip";
-        const file = new File([blob], `${base}${attempt.ext}`, {
-          type: attempt.mime || OPUS_MIME,
-          lastModified: Date.now(),
-        });
-        opusLog("encode ok", {
-          label: attempt.label,
-          bytes: file.size,
-          mime: attempt.mime,
-        });
-        onProgress?.({
-          phase: "done",
-          ratio: 1,
-          message: `Ready · ${(file.size / 1024).toFixed(0)} KB Opus`,
-        });
-        return file;
-      } catch (err) {
-        lastErr = `${attempt.label}: ${formatUnknownError(err)} // ${recentLogs()}`;
-        opusError("exec/read failed", lastErr, err);
-      }
+    // Cap absurd crops (protect MEMFS).
+    if (wav.byteLength > 12 * 1024 * 1024) {
+      throw new Error(
+        `Crop WAV too large (${(wav.byteLength / 1024 / 1024).toFixed(1)} MB). Use a shorter crop.`,
+      );
     }
 
-    throw new Error(lastErr || "All Opus encode attempts failed");
+    // 2) ffmpeg.wasm on the small WAV.
+    try {
+      const file = await encodeWavWithFfmpeg(wav, base, onProgress);
+      onProgress?.({
+        phase: "done",
+        ratio: 1,
+        message: `Ready · ${(file.size / 1024).toFixed(0)} KB ${file.type.includes("mpeg") ? "MP3" : "Opus"}`,
+      });
+      return file;
+    } catch (err) {
+      const msg = formatUnknownError(err);
+      errors.push(`ffmpeg: ${msg}`);
+      opusWarn("ffmpeg path failed — trying MediaRecorder", msg);
+      resetFfmpegSingleton("after ffmpeg failure");
+    }
+
+    // 3) MediaRecorder Opus/WebM (no wasm).
+    try {
+      const file = await encodeViaMediaRecorder(mono, base, onProgress);
+      onProgress?.({
+        phase: "done",
+        ratio: 1,
+        message: `Ready · ${(file.size / 1024).toFixed(0)} KB Opus (browser)`,
+      });
+      return file;
+    } catch (err) {
+      const msg = formatUnknownError(err);
+      errors.push(`mediarecorder: ${msg}`);
+      opusError("mediarecorder failed", msg);
+    }
+
+    // 4) Last resort: upload the mono WAV crop (always playable; larger).
+    const wavFile = fileFromBytes(wav, base, ".wav", "audio/wav");
+    // Server currently may reject .wav — only use if we extend MIME.
+    // Prefer failing clearly if we can't produce compressed audio.
+    throw new Error(errors.join(" · ") || "All encode paths failed");
   } catch (err) {
     const message = formatUnknownError(err);
-    const detail = recentLogs() ? `${message} — ff: ${recentLogs()}` : message;
-    opusError("encodeOpusCrop failed", detail, err);
+    opusError("encodeOpusCrop failed", message, err);
     onProgress?.({
       phase: "error",
-      message: `Could not convert audio: ${detail}`,
+      message: `Could not convert audio: ${message}`,
     });
-    // Next Convert click gets a fresh instance (avoids stuck/detached state).
-    resetFfmpegSingleton("encode failure");
     throw new Error(
-      `Could not convert audio to Opus. Try a different file or shorter crop. (${detail})`,
+      `Could not convert audio to Opus. Try a different file or shorter crop. (${message})`,
     );
-  } finally {
-    ffmpeg.off?.("log", onLog);
-    try {
-      await ffmpeg.deleteFile(inName);
-    } catch {
-      /* ignore */
-    }
   }
 }
 
