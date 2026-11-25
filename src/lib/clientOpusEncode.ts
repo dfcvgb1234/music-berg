@@ -544,10 +544,35 @@ async function encodeViaMediaRecorder(
   }
 }
 
+/** Soft MEMFS budget — above this we chunk or prefer MediaRecorder (not a hard reject). */
+const WASM_SAFE_WAV_BYTES = 5 * 1024 * 1024; // ~54s mono 48 kHz PCM
+/** Chunk length for large crops through ffmpeg.wasm. */
+const CHUNK_SEC = 25;
+
+function sliceAudioBuffer(
+  buffer: AudioBuffer,
+  startSec: number,
+  endSec: number,
+): AudioBuffer {
+  const rate = buffer.sampleRate;
+  const startFrame = Math.max(0, Math.floor(startSec * rate));
+  const endFrame = Math.min(buffer.length, Math.ceil(endSec * rate));
+  const frames = Math.max(1, endFrame - startFrame);
+  const out = new AudioBuffer({
+    length: frames,
+    numberOfChannels: 1,
+    sampleRate: rate,
+  });
+  const src = buffer.getChannelData(0);
+  out.copyToChannel(src.subarray(startFrame, startFrame + frames), 0);
+  return out;
+}
+
 async function encodeWavWithFfmpeg(
   wav: Uint8Array,
   base: string,
   onProgress?: (p: EncodeProgress) => void,
+  progressHint = 0.35,
 ): Promise<File> {
   const ffmpeg = await getFfmpeg(onProgress);
   const inName = "crop.wav";
@@ -584,7 +609,7 @@ async function encodeWavWithFfmpeg(
         opusLog("exec", attempt.label, attempt.args.join(" "));
         onProgress?.({
           phase: "encoding",
-          ratio: 0.35,
+          ratio: progressHint,
           message: `Encoding (${attempt.label})…`,
         });
         try {
@@ -607,12 +632,7 @@ async function encodeWavWithFfmpeg(
           lastErr = `empty output [${attempt.label}]`;
           continue;
         }
-        const file = fileFromBytes(
-          data,
-          base,
-          attempt.ext,
-          attempt.mime,
-        );
+        const file = fileFromBytes(data, base, attempt.ext, attempt.mime);
         opusLog("ffmpeg encode ok", {
           label: attempt.label,
           bytes: file.size,
@@ -639,6 +659,169 @@ async function encodeWavWithFfmpeg(
   }
 }
 
+/**
+ * Encode a long mono buffer as Opus by feeding ~CHUNK_SEC WAV slices into
+ * ffmpeg, then concatenating Ogg parts (keeps MEMFS small → avoids OOB).
+ */
+async function encodeChunkedOpus(
+  buffer: AudioBuffer,
+  base: string,
+  onProgress?: (p: EncodeProgress) => void,
+): Promise<File> {
+  const duration = buffer.duration;
+  const parts: string[] = [];
+  const ffmpeg = await getFfmpeg(onProgress);
+  const logLines: string[] = [];
+  const onLog = ({ message }: { message?: string }) => {
+    if (typeof message === "string" && message.trim()) {
+      logLines.push(message);
+      if (logLines.length > 120) logLines.splice(0, logLines.length - 120);
+    }
+  };
+  ffmpeg.on("log", onLog);
+
+  try {
+    let part = 0;
+    for (let t = 0; t < duration; t += CHUNK_SEC) {
+      const end = Math.min(duration, t + CHUNK_SEC);
+      const slice = sliceAudioBuffer(buffer, t, end);
+      const wav = audioBufferToWav(slice);
+      const inName = `chunk_${part}.wav`;
+      const outName = `part_${part}.ogg`;
+      onProgress?.({
+        phase: "encoding",
+        ratio: 0.15 + (0.6 * t) / Math.max(duration, 0.01),
+        message: `Encoding chunk ${part + 1} (${t.toFixed(0)}–${end.toFixed(0)}s)…`,
+      });
+      opusLog("chunk encode", {
+        part,
+        start: t,
+        end,
+        wavBytes: wav.byteLength,
+      });
+      try {
+        await ffmpeg.deleteFile(inName);
+      } catch {
+        /* ignore */
+      }
+      try {
+        await ffmpeg.deleteFile(outName);
+      } catch {
+        /* ignore */
+      }
+      await ffmpeg.writeFile(inName, toTransferableBytes(wav));
+      const code = await ffmpeg.exec([
+        "-i",
+        inName,
+        "-vn",
+        "-map_metadata",
+        "-1",
+        "-ac",
+        "1",
+        "-ar",
+        String(TARGET_RATE),
+        "-c:a",
+        "libopus",
+        "-b:a",
+        OPUS_BITRATE,
+        "-application",
+        "audio",
+        outName,
+      ]);
+      try {
+        await ffmpeg.deleteFile(inName);
+      } catch {
+        /* ignore */
+      }
+      if (code !== 0) {
+        throw new Error(`chunk ${part} ffmpeg exit ${code}`);
+      }
+      parts.push(outName);
+      part += 1;
+    }
+
+    if (parts.length === 1) {
+      const data = await ffmpeg.readFile(parts[0]);
+      if (!(data instanceof Uint8Array) || data.byteLength < 64) {
+        throw new Error("chunked encode empty");
+      }
+      return fileFromBytes(data, base, ".ogg", "audio/ogg");
+    }
+
+    // concat demuxer — copy Opus packets into one Ogg.
+    const listBody = parts.map((p) => `file '${p}'`).join("\n");
+    const listBytes = new TextEncoder().encode(listBody);
+    await ffmpeg.writeFile("concat.txt", toTransferableBytes(listBytes));
+    try {
+      await ffmpeg.deleteFile("out_concat.ogg");
+    } catch {
+      /* ignore */
+    }
+    onProgress?.({
+      phase: "encoding",
+      ratio: 0.85,
+      message: "Joining Opus chunks…",
+    });
+    const concatCode = await ffmpeg.exec([
+      "-f",
+      "concat",
+      "-safe",
+      "0",
+      "-i",
+      "concat.txt",
+      "-c",
+      "copy",
+      "out_concat.ogg",
+    ]);
+    if (concatCode !== 0) {
+      // Re-encode merge if copy fails across Ogg boundaries.
+      const remuxCode = await ffmpeg.exec([
+        "-f",
+        "concat",
+        "-safe",
+        "0",
+        "-i",
+        "concat.txt",
+        "-c:a",
+        "libopus",
+        "-b:a",
+        OPUS_BITRATE,
+        "-ac",
+        "1",
+        "-ar",
+        String(TARGET_RATE),
+        "out_concat.ogg",
+      ]);
+      if (remuxCode !== 0) {
+        throw new Error("chunk concat failed");
+      }
+    }
+    const data = await ffmpeg.readFile("out_concat.ogg");
+    if (!(data instanceof Uint8Array) || data.byteLength < 64) {
+      throw new Error("concat output empty");
+    }
+    opusLog("chunked encode ok", { parts: parts.length, bytes: data.byteLength });
+    return fileFromBytes(data, base, ".ogg", "audio/ogg");
+  } catch (err) {
+    if (isMemoryError(formatUnknownError(err))) {
+      resetFfmpegSingleton("chunked OOB");
+    }
+    throw err;
+  } finally {
+    ffmpeg.off?.("log", onLog);
+  }
+}
+
+function doneMessage(file: File, via?: string): string {
+  const kind = file.type.includes("mpeg")
+    ? "MP3"
+    : file.type.includes("webm") || file.type.includes("ogg")
+      ? "Opus"
+      : "audio";
+  const suffix = via ? ` (${via})` : "";
+  return `Ready · ${(file.size / 1024).toFixed(0)} KB ${kind}${suffix}`;
+}
+
 export async function encodeOpusCrop(
   source: File | Blob,
   crop: CropRange,
@@ -660,7 +843,7 @@ export async function encodeOpusCrop(
       message: "Preparing crop…",
     });
 
-    // 1) Browser decode + mono crop → tiny WAV (avoids stereo/ID3 OOB in wasm).
+    // 1) Browser decode + mono crop (avoids stereo/ID3 OOB in wasm).
     const mono = await decodeCropMono(
       source,
       { startSec: start, endSec: end },
@@ -671,22 +854,55 @@ export async function encodeOpusCrop(
       wavBytes: wav.byteLength,
       duration: mono.duration,
       frames: mono.length,
+      mb: (wav.byteLength / (1024 * 1024)).toFixed(1),
     });
 
-    // Cap absurd crops (protect MEMFS).
-    if (wav.byteLength > 12 * 1024 * 1024) {
-      throw new Error(
-        `Crop WAV too large (${(wav.byteLength / 1024 / 1024).toFixed(1)} MB). Use a shorter crop.`,
-      );
+    // No hard reject on WAV size — route large crops around MEMFS instead.
+    const large = wav.byteLength > WASM_SAFE_WAV_BYTES;
+
+    // 2a) Large crops: chunked ffmpeg (small MEMFS writes) first.
+    if (large) {
+      opusLog("large crop — trying chunked ffmpeg", {
+        wavBytes: wav.byteLength,
+        chunkSec: CHUNK_SEC,
+      });
+      try {
+        const file = await encodeChunkedOpus(mono, base, onProgress);
+        onProgress?.({
+          phase: "done",
+          ratio: 1,
+          message: doneMessage(file, "chunked"),
+        });
+        return file;
+      } catch (err) {
+        const msg = formatUnknownError(err);
+        errors.push(`chunked: ${msg}`);
+        opusWarn("chunked ffmpeg failed — trying MediaRecorder", msg);
+        resetFfmpegSingleton("after chunked failure");
+      }
+
+      try {
+        const file = await encodeViaMediaRecorder(mono, base, onProgress);
+        onProgress?.({
+          phase: "done",
+          ratio: 1,
+          message: doneMessage(file, "browser"),
+        });
+        return file;
+      } catch (err) {
+        const msg = formatUnknownError(err);
+        errors.push(`mediarecorder: ${msg}`);
+        opusWarn("mediarecorder failed — trying single-pass ffmpeg", msg);
+      }
     }
 
-    // 2) ffmpeg.wasm on the small WAV.
+    // 2b) Small crops (or large-path exhausted): single-pass ffmpeg on WAV.
     try {
       const file = await encodeWavWithFfmpeg(wav, base, onProgress);
       onProgress?.({
         phase: "done",
         ratio: 1,
-        message: `Ready · ${(file.size / 1024).toFixed(0)} KB ${file.type.includes("mpeg") ? "MP3" : "Opus"}`,
+        message: doneMessage(file),
       });
       return file;
     } catch (err) {
@@ -696,13 +912,13 @@ export async function encodeOpusCrop(
       resetFfmpegSingleton("after ffmpeg failure");
     }
 
-    // 3) MediaRecorder Opus/WebM (no wasm).
+    // 3) MediaRecorder Opus/WebM (no wasm heap).
     try {
       const file = await encodeViaMediaRecorder(mono, base, onProgress);
       onProgress?.({
         phase: "done",
         ratio: 1,
-        message: `Ready · ${(file.size / 1024).toFixed(0)} KB Opus (browser)`,
+        message: doneMessage(file, "browser"),
       });
       return file;
     } catch (err) {
@@ -711,10 +927,6 @@ export async function encodeOpusCrop(
       opusError("mediarecorder failed", msg);
     }
 
-    // 4) Last resort: upload the mono WAV crop (always playable; larger).
-    const wavFile = fileFromBytes(wav, base, ".wav", "audio/wav");
-    // Server currently may reject .wav — only use if we extend MIME.
-    // Prefer failing clearly if we can't produce compressed audio.
     throw new Error(errors.join(" · ") || "All encode paths failed");
   } catch (err) {
     const message = formatUnknownError(err);
