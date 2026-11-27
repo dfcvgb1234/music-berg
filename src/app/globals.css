@@ -400,6 +400,10 @@ textarea {
   margin: 0;
 }
 
+.resume-card {
+  gap: 0.75rem;
+}
+
 .finish-podium {
   display: grid;
   grid-template-columns: 1fr 1.15fr 1fr;

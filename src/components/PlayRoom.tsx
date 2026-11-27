@@ -8,13 +8,12 @@ import { TrackPicker, type PickedTrack } from "@/components/TrackPicker";
 import { Scoreboard } from "@/components/Scoreboard";
 import { formatClipSeconds, pointsForClip } from "@/lib/clipRules";
 import { readApiJson } from "@/lib/readApiJson";
+import {
+  clearMembershipForCode,
+  readStoredPlayer,
+  type StoredPlayer,
+} from "@/lib/sessionLocal";
 import { useSessionStream } from "@/lib/useSessionStream";
-
-type StoredPlayer = {
-  token: string;
-  participantId: string;
-  displayName: string;
-};
 
 export function PlayRoom() {
   const params = useParams<{ code: string }>();
@@ -26,16 +25,10 @@ export function PlayRoom() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    const raw = localStorage.getItem(`riffrush-player-${code}`);
-    if (!raw) return;
-    try {
-      setPlayer(JSON.parse(raw) as StoredPlayer);
-    } catch {
-      setPlayer(null);
-    }
+    setPlayer(readStoredPlayer(code));
   }, [code]);
 
-  const { state, setState, connected } = useSessionStream(code, {
+  const { state, setState, connected, missing } = useSessionStream(code, {
     enabled: Boolean(player),
   });
 
@@ -44,6 +37,15 @@ export function PlayRoom() {
     setError(null);
     setPick(null);
   }, [state?.currentSongIndex]);
+
+  // Finished → hide Resume; gone/expired → wipe local creds too.
+  useEffect(() => {
+    if (missing) {
+      clearMembershipForCode(code, { clearCreds: true });
+    } else if (state?.status === "finished") {
+      clearMembershipForCode(code);
+    }
+  }, [missing, state?.status, code]);
 
   const onGuess = async (e: FormEvent) => {
     e.preventDefault();

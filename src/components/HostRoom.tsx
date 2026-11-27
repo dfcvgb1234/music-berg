@@ -10,6 +10,10 @@ import {
 } from "@/components/HostVisualizer";
 import { Scoreboard } from "@/components/Scoreboard";
 import { formatClipSeconds, pointsForClip } from "@/lib/clipRules";
+import {
+  clearMembershipForCode,
+  readHostToken,
+} from "@/lib/sessionLocal";
 import { useSessionStream } from "@/lib/useSessionStream";
 
 export function HostRoom() {
@@ -21,13 +25,22 @@ export function HostRoom() {
   const vizRef = useRef<HostVisualizerHandle | null>(null);
 
   useEffect(() => {
-    setHostToken(localStorage.getItem(`riffrush-host-${code}`));
+    setHostToken(readHostToken(code));
   }, [code]);
 
-  const { state, setState, connected } = useSessionStream(code, {
+  const { state, setState, connected, missing } = useSessionStream(code, {
     hostToken,
     enabled: Boolean(hostToken),
   });
+
+  // Finished → drop active-host pointer; gone/expired → wipe host token too.
+  useEffect(() => {
+    if (missing) {
+      clearMembershipForCode(code, { clearCreds: true });
+    } else if (state?.status === "finished") {
+      clearMembershipForCode(code);
+    }
+  }, [missing, state?.status, code]);
 
   const run = (path: "play" | "extend" | "reveal" | "next") => {
     void vizRef.current?.runFromGesture(path);
@@ -73,7 +86,11 @@ export function HostRoom() {
           <div className="finish-wrap">
             <FinishScreen participants={state.participants} />
             <div className="actions finish-actions">
-              <Link className="btn" href="/host">
+              <Link
+                className="btn"
+                href="/host"
+                onClick={() => clearMembershipForCode(code, { clearCreds: true })}
+              >
                 New quiz
               </Link>
             </div>

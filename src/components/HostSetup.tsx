@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { CreateTrackListForm } from "@/components/CreateTrackListForm";
 import { readApiJson } from "@/lib/readApiJson";
+import { setActiveHost, writeHostToken } from "@/lib/sessionLocal";
 
 type TrackList = {
   id: string;
@@ -58,7 +59,8 @@ export function HostSetup() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Could not start quiz");
-      localStorage.setItem(`riffrush-host-${data.code}`, data.hostToken);
+      writeHostToken(data.code, data.hostToken);
+      setActiveHost(data.code);
       router.push(`/host/${data.code}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed");

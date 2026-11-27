@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { sql } from "@/lib/db";
 import { newId, newSessionCode, newToken } from "@/lib/ids";
-import { broadcastSession } from "@/lib/quiz";
+import { broadcastSession, expireStaleSessions } from "@/lib/quiz";
 import { clientKey, rateLimit } from "@/lib/rateLimit";
+import { SESSION_TTL_HOURS } from "@/lib/sessionTtl";
 
 export const runtime = "nodejs";
 
@@ -19,6 +20,8 @@ export async function POST(request: Request) {
   if (!templateId) {
     return NextResponse.json({ error: "Pick a track list" }, { status: 400 });
   }
+
+  await expireStaleSessions();
 
   const sessionCount = await sql<{ count: string }>(
     `select count(*)::text as count from sessions where status <> 'finished'`,
@@ -80,5 +83,6 @@ export async function POST(request: Request) {
     code,
     hostToken,
     templateName: templates[0].name,
+    ttlHours: SESSION_TTL_HOURS,
   });
 }

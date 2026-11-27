@@ -8,6 +8,11 @@ import {
 } from "@/lib/clipRules";
 import { sql } from "@/lib/db";
 import { publish } from "@/lib/pubsub";
+import {
+  isSessionExpired,
+  sessionExpiresAt,
+  SESSION_TTL_MS,
+} from "@/lib/sessionTtl";
 
 export type ParticipantView = {
   id: string;
@@ -58,6 +63,10 @@ export type SessionState = {
   revealAnswer: boolean;
   participants: ParticipantView[];
   everyoneCorrect: boolean;
+  /** ISO timestamp when the session was created. */
+  createdAt: string | null;
+  /** ISO timestamp when the session TTL elapses (~2.5h). */
+  expiresAt: string | null;
 };
 
 type SessionRow = {
@@ -71,6 +80,7 @@ type SessionRow = {
   extend_count: number | null;
   play_token: number;
   play_started_at: string | Date | null;
+  created_at: string | Date;
   template_name: string;
 };
 
@@ -89,17 +99,42 @@ type ParticipantRow = {
   score: number;
 };
 
+async function purgeSession(sessionId: string): Promise<void> {
+  await sql(`delete from guesses where session_id = $1`, [sessionId]);
+  await sql(`delete from participants where session_id = $1`, [sessionId]);
+  await sql(`delete from sessions where id = $1`, [sessionId]);
+}
+
+/** Drop sessions older than SESSION_TTL_MS (best-effort sweep). */
+export async function expireStaleSessions(): Promise<number> {
+  const cutoff = new Date(Date.now() - SESSION_TTL_MS).toISOString();
+  const stale = await sql<{ id: string }>(
+    `select id from sessions where created_at < $1`,
+    [cutoff],
+  );
+  for (const row of stale) {
+    await purgeSession(row.id);
+  }
+  return stale.length;
+}
+
 export async function getSessionByCode(code: string): Promise<SessionRow | null> {
   const rows = await sql<SessionRow>(
     `select s.id, s.code, s.template_id, s.host_token, s.status,
             s.current_song_index, s.clip_ms, s.extend_count, s.play_token, s.play_started_at,
-            t.name as template_name
+            s.created_at, t.name as template_name
      from sessions s
      join templates t on t.id = s.template_id
      where s.code = $1`,
     [code.toUpperCase()],
   );
-  return rows[0] ?? null;
+  const session = rows[0];
+  if (!session) return null;
+  if (isSessionExpired(session.created_at)) {
+    await purgeSession(session.id);
+    return null;
+  }
+  return session;
 }
 
 export async function buildSessionState(
@@ -206,6 +241,12 @@ export async function buildSessionState(
     revealAnswer: reveal,
     participants: participantViews,
     everyoneCorrect,
+    createdAt: session.created_at
+      ? new Date(session.created_at).toISOString()
+      : null,
+    expiresAt: session.created_at
+      ? sessionExpiresAt(session.created_at).toISOString()
+      : null,
   };
 }
 
