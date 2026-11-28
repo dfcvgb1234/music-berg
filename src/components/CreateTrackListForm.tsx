@@ -765,6 +765,8 @@ export function CreateTrackListForm({
         {editId ? " · editing" : ""}
       </p>
 
+      {/* YouTube UI only on local/dev — hidden entirely when process.env.VERCEL. */}
+      {ytStatus && !ytStatus.onVercel && (
       <div className="youtube-playlist-import">
         <div className="field">
           <label htmlFor="youtube-playlist-url">Import from YouTube playlist</label>
@@ -788,15 +790,14 @@ export function CreateTrackListForm({
             </button>
           </div>
           <p className="muted youtube-url-hint">
-            {ytStatus == null
-              ? "Checking local yt-dlp…"
-              : ytStatus.available
-                ? "Local yt-dlp: downloads ~196k MP3, pre-selects first Deezer hit. Review matches, crop, Convert to Opus."
-                : ytStatus.reason ||
-                  "YouTube download runs only with local yt-dlp + ffmpeg (not on Vercel). Use npm run import:youtube as a CLI fallback."}
+            {ytStatus.available
+              ? "Local yt-dlp: downloads ~196k MP3, pre-selects first Deezer hit. Review matches, crop, Convert to Opus."
+              : ytStatus.reason ||
+                "Install yt-dlp + ffmpeg, or use npm run import:youtube."}
           </p>
         </div>
       </div>
+      )}
 
       <div className="song-rows">
         {songs.map((song, index) => {
@@ -886,13 +887,17 @@ export function CreateTrackListForm({
                     );
                   }}
                 />
-                <YouTubeUrlImport
-                  uploadSecret={uploadSecret}
-                  available={Boolean(ytStatus?.available)}
-                  unavailableReason={ytStatus?.reason ?? null}
-                  disabled={busy}
-                  onImported={(result) => applyYoutubeToSong(song.key, result)}
-                />
+                {ytStatus && !ytStatus.onVercel && (
+                  <YouTubeUrlImport
+                    uploadSecret={uploadSecret}
+                    available={Boolean(ytStatus.available)}
+                    unavailableReason={ytStatus.reason ?? null}
+                    disabled={busy}
+                    onImported={(result) =>
+                      applyYoutubeToSong(song.key, result)
+                    }
+                  />
+                )}
               </div>
               <div className="song-row-side">
                 <p
