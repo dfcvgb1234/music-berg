@@ -16,7 +16,7 @@ export type PickedTrack = {
   label: string;
 };
 
-function hitToPick(hit: DeezerTrackHit): PickedTrack {
+export function hitToPick(hit: DeezerTrackHit): PickedTrack {
   const ids = hit.matchedIds?.length ? hit.matchedIds : [hit.id];
   return {
     itunesTrackId: hit.id,

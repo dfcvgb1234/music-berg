@@ -7,11 +7,19 @@ import {
   remapSegmentsToCrop,
   type PreparedAudio,
 } from "@/components/AudioCropField";
-import { TrackPicker, type PickedTrack } from "@/components/TrackPicker";
+import { TrackPicker, hitToPick, type PickedTrack } from "@/components/TrackPicker";
+import { YouTubeUrlImport } from "@/components/YouTubeUrlImport";
 import { OPUS_MIME } from "@/lib/audioMime";
 import { probeAudioDuration } from "@/lib/clientOpusEncode";
 import { readApiJson } from "@/lib/readApiJson";
 import { formatBytes, uploadLimits } from "@/lib/uploadLimits";
+import { classifyYoutubeUrl } from "@/lib/youtubeUrl";
+import {
+  downloadYoutubeAudioClient,
+  fetchYoutubeImportStatus,
+  resolveYoutubePlaylistClient,
+  type YoutubeImportStatus,
+} from "@/lib/youtubeClient";
 
 type SongDraft = {
   key: string;
@@ -25,6 +33,8 @@ type SongDraft = {
   /** Existing DB song — keep audio when `audio` is null. */
   existingSongId?: string;
   existingClip?: { file: File; label: string } | null;
+  /** Inject downloaded YouTube audio into AudioCropField. */
+  injectFile?: { file: File; token: number } | null;
 };
 
 type UploadMode = "r2" | "blob" | "direct" | "unknown";
@@ -119,6 +129,10 @@ export function CreateTrackListForm({
   const [loadingEdit, setLoadingEdit] = useState(false);
   const [editLoaded, setEditLoaded] = useState(!editId);
   const [uploadMode, setUploadMode] = useState<UploadMode>("unknown");
+  const [ytStatus, setYtStatus] = useState<YoutubeImportStatus | null>(null);
+  const [playlistUrl, setPlaylistUrl] = useState("");
+  const [playlistBusy, setPlaylistBusy] = useState(false);
+  const injectTokenRef = useRef(1);
 
   useEffect(() => {
     let cancelled = false;
@@ -139,6 +153,134 @@ export function CreateTrackListForm({
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const status = await fetchYoutubeImportStatus();
+      if (!cancelled) setYtStatus(status);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const applyYoutubeToSong = (
+    songKey: string,
+    result: Awaited<ReturnType<typeof downloadYoutubeAudioClient>>,
+  ) => {
+    injectTokenRef.current += 1;
+    const token = injectTokenRef.current;
+    const pick = result.meta.deezerHit
+      ? hitToPick(result.meta.deezerHit)
+      : null;
+    setSongs((prev) =>
+      prev.map((s) =>
+        s.key === songKey
+          ? {
+              ...s,
+              pick: pick ?? s.pick,
+              extraAnswers: pick ? [] : s.extraAnswers,
+              existingSongId: undefined,
+              existingClip: null,
+              audio: null,
+              segmentPointsSec: [],
+              injectFile: { file: result.file, token },
+            }
+          : s,
+      ),
+    );
+  };
+
+  const onImportPlaylist = async () => {
+    setError(null);
+    setStatus(null);
+    const kind = classifyYoutubeUrl(playlistUrl);
+    if (kind === "invalid") {
+      setError("Paste a YouTube playlist or video URL");
+      return;
+    }
+    if (!ytStatus?.available) {
+      setError(
+        ytStatus?.reason ||
+          "YouTube import needs local yt-dlp + ffmpeg (not available on Vercel).",
+      );
+      return;
+    }
+    setPlaylistBusy(true);
+    setBusy(true);
+    try {
+      setStatus("Resolving YouTube playlist…");
+      const entries = await resolveYoutubePlaylistClient(
+        playlistUrl,
+        uploadSecret,
+      );
+      if (entries.length === 0) throw new Error("Playlist is empty");
+
+      const imported: SongDraft[] = [];
+      let failures = 0;
+      for (let i = 0; i < entries.length; i++) {
+        const entry = entries[i]!;
+        setStatus(
+          `Downloading ${i + 1}/${entries.length}: ${entry.title.slice(0, 60)}…`,
+        );
+        try {
+          const result = await downloadYoutubeAudioClient(
+            entry.url,
+            uploadSecret,
+          );
+          seqRef.current += 1;
+          injectTokenRef.current += 1;
+          const pick = result.meta.deezerHit
+            ? hitToPick(result.meta.deezerHit)
+            : null;
+          imported.push({
+            key: newSongKey(seqRef.current),
+            pick,
+            extraAnswers: [],
+            audio: null,
+            segmentPointsSec: [],
+            injectFile: {
+              file: result.file,
+              token: injectTokenRef.current,
+            },
+          });
+        } catch {
+          failures += 1;
+        }
+      }
+
+      if (imported.length === 0) {
+        throw new Error(
+          failures > 0
+            ? `All ${failures} downloads failed (YouTube blocks are common on cloud IPs — try cookies locally).`
+            : "No tracks imported",
+        );
+      }
+
+      setSongs((prev) => {
+        const onlyEmpty =
+          prev.length === 1 &&
+          !prev[0]?.pick &&
+          !prev[0]?.audio &&
+          !prev[0]?.existingSongId &&
+          !prev[0]?.injectFile;
+        return onlyEmpty ? imported : [...prev, ...imported];
+      });
+      setPlaylistUrl("");
+      setStatus(
+        `Imported ${imported.length} track${imported.length === 1 ? "" : "s"}` +
+          (failures ? ` (${failures} failed)` : "") +
+          ". Review Deezer matches, crop, and Convert to Opus.",
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Playlist import failed");
+      setStatus(null);
+    } finally {
+      setPlaylistBusy(false);
+      setBusy(false);
+    }
+  };
 
   const loadEdit = async () => {
     if (!editId) return;
@@ -623,6 +765,39 @@ export function CreateTrackListForm({
         {editId ? " · editing" : ""}
       </p>
 
+      <div className="youtube-playlist-import">
+        <div className="field">
+          <label htmlFor="youtube-playlist-url">Import from YouTube playlist</label>
+          <div className="youtube-url-row">
+            <input
+              id="youtube-playlist-url"
+              type="url"
+              value={playlistUrl}
+              disabled={busy || playlistBusy}
+              onChange={(e) => setPlaylistUrl(e.target.value)}
+              placeholder="https://www.youtube.com/playlist?list=…"
+              autoComplete="off"
+            />
+            <button
+              type="button"
+              className="btn secondary"
+              disabled={busy || playlistBusy || !playlistUrl.trim()}
+              onClick={() => void onImportPlaylist()}
+            >
+              {playlistBusy ? "Importing…" : "Import playlist"}
+            </button>
+          </div>
+          <p className="muted youtube-url-hint">
+            {ytStatus == null
+              ? "Checking local yt-dlp…"
+              : ytStatus.available
+                ? "Local yt-dlp: downloads ~196k MP3, pre-selects first Deezer hit. Review matches, crop, Convert to Opus."
+                : ytStatus.reason ||
+                  "YouTube download runs only with local yt-dlp + ffmpeg (not on Vercel). Use npm run import:youtube as a CLI fallback."}
+          </p>
+        </div>
+      </div>
+
       <div className="song-rows">
         {songs.map((song, index) => {
           const ready = Boolean(
@@ -654,58 +829,71 @@ export function CreateTrackListForm({
                 }}
                 placeholder="Search title or artist…"
               />
-              <AudioCropField
-                id={`song-file-${song.key}`}
-                label={`Song ${index + 1} audio`}
-                value={song.audio}
-                disabled={busy}
-                existingClip={song.existingClip}
-                segmentPointsSec={song.segmentPointsSec}
-                onSegmentPointsChange={(segmentPointsSec) => {
-                  setSongs((prev) =>
-                    prev.map((s) =>
-                      s.key === song.key ? { ...s, segmentPointsSec } : s,
-                    ),
-                  );
-                }}
-                onClearExisting={() => {
-                  setSongs((prev) =>
-                    prev.map((s) =>
-                      s.key === song.key
-                        ? {
-                            ...s,
-                            existingSongId: undefined,
-                            existingClip: null,
-                            segmentPointsSec: [],
-                          }
-                        : s,
-                    ),
-                  );
-                }}
-                onChange={(audio) => {
-                  setSongs((prev) =>
-                    prev.map((s) =>
-                      s.key === song.key
-                        ? {
-                            ...s,
-                            audio,
-                            existingSongId: audio ? undefined : s.existingSongId,
-                            durationMs: audio
-                              ? Math.round(
-                                  (audio.endSec - audio.startSec) * 1000,
-                                )
-                              : s.durationMs,
-                            segmentPointsSec: audio
-                              ? audio.segmentPointsSec.map(
-                                  (p) => p + audio.startSec,
-                                )
-                              : s.segmentPointsSec,
-                          }
-                        : s,
-                    ),
-                  );
-                }}
-              />
+              <div className="song-audio-block">
+                <AudioCropField
+                  id={`song-file-${song.key}`}
+                  label={`Song ${index + 1} audio`}
+                  value={song.audio}
+                  disabled={busy}
+                  existingClip={song.existingClip}
+                  injectFile={song.injectFile}
+                  segmentPointsSec={song.segmentPointsSec}
+                  onSegmentPointsChange={(segmentPointsSec) => {
+                    setSongs((prev) =>
+                      prev.map((s) =>
+                        s.key === song.key ? { ...s, segmentPointsSec } : s,
+                      ),
+                    );
+                  }}
+                  onClearExisting={() => {
+                    setSongs((prev) =>
+                      prev.map((s) =>
+                        s.key === song.key
+                          ? {
+                              ...s,
+                              existingSongId: undefined,
+                              existingClip: null,
+                              segmentPointsSec: [],
+                              injectFile: null,
+                            }
+                          : s,
+                      ),
+                    );
+                  }}
+                  onChange={(audio) => {
+                    setSongs((prev) =>
+                      prev.map((s) =>
+                        s.key === song.key
+                          ? {
+                              ...s,
+                              audio,
+                              existingSongId: audio
+                                ? undefined
+                                : s.existingSongId,
+                              durationMs: audio
+                                ? Math.round(
+                                    (audio.endSec - audio.startSec) * 1000,
+                                  )
+                                : s.durationMs,
+                              segmentPointsSec: audio
+                                ? audio.segmentPointsSec.map(
+                                    (p) => p + audio.startSec,
+                                  )
+                                : s.segmentPointsSec,
+                            }
+                          : s,
+                      ),
+                    );
+                  }}
+                />
+                <YouTubeUrlImport
+                  uploadSecret={uploadSecret}
+                  available={Boolean(ytStatus?.available)}
+                  unavailableReason={ytStatus?.reason ?? null}
+                  disabled={busy}
+                  onImported={(result) => applyYoutubeToSong(song.key, result)}
+                />
+              </div>
               <div className="song-row-side">
                 <p
                   className={ready ? "ok-msg" : "muted"}
