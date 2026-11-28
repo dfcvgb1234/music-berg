@@ -38,7 +38,7 @@ const nextConfig: NextConfig = {
             // wasm-unsafe-eval + blob workers: client ffmpeg.wasm Opus encode on upload.
             // R2: browser PUTs to *.r2.cloudflarestorage.com (and optional custom domain).
             value:
-              `default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https://*.mzstatic.com https://*.dzcdn.net; media-src 'self' blob: https://*.dzcdn.net; connect-src 'self' blob: https://*.blob.vercel-storage.com https://vercel.com ${connectExtra}; frame-ancestors 'none'; base-uri 'self'; form-action 'self'`,
+              `default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https://*.mzstatic.com https://*.dzcdn.net; media-src 'self' blob: https://*.dzcdn.net ${connectExtra}; connect-src 'self' blob: https://*.blob.vercel-storage.com https://vercel.com ${connectExtra}; frame-ancestors 'none'; base-uri 'self'; form-action 'self'`,
           },
         ],
       },

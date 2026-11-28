@@ -18,8 +18,9 @@ type Body = {
 };
 
 /**
- * Issue a short-lived R2 presigned PUT URL for client Opus uploads.
- * Browser uploads directly to R2; `/api/templates` then pulls by staging URL.
+ * Issue a short-lived R2 presigned PUT URL for durable client Opus uploads.
+ * Browser uploads directly to R2; `/api/templates` stores the object key
+ * (does not copy bytes into Postgres).
  */
 export async function POST(request: Request): Promise<NextResponse> {
   if (!r2UploadsEnabled()) {
@@ -72,8 +73,9 @@ export async function POST(request: Request): Promise<NextResponse> {
     );
   }
 
-  // Namespace under templates/ with a random suffix (no overwrite).
+  // Durable namespace under songs/ with a random suffix (no overwrite).
   const safeBase = pathname
+    .replace(/^songs\//, "")
     .replace(/^templates\//, "")
     .replace(/[^\w.\-/]+/g, "_")
     .slice(0, 160);
@@ -81,7 +83,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     typeof crypto !== "undefined" && "randomUUID" in crypto
       ? crypto.randomUUID()
       : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  const key = `templates/${rand}-${safeBase}`.slice(0, 200);
+  const key = `songs/${rand}-${safeBase}`.slice(0, 200);
 
   try {
     const signed = await createR2PresignedUpload({
@@ -92,6 +94,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     return NextResponse.json({
       uploadUrl: signed.uploadUrl,
       stagingUrl: signed.stagingUrl,
+      objectUrl: signed.objectUrl,
       key: signed.key,
       bucket: signed.bucket,
       contentType: resolvedType,

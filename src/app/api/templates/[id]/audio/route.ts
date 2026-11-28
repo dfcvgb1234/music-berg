@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import { assertUploadAuthorized } from "@/lib/audioValidate";
 import { sql } from "@/lib/db";
+import { respondWithSongAudio } from "@/lib/songAudio";
 
 export const runtime = "nodejs";
+export const maxDuration = 60;
 
 /**
  * Host-only: fetch a stored song clip for edit / segment marking.
@@ -22,10 +24,12 @@ export async function GET(
   }
 
   const rows = await sql<{
-    mime_type: string;
-    audio_data: Buffer;
+    mime_type: string | null;
+    r2_object_key: string | null;
+    r2_object_url: string | null;
+    audio_data: Buffer | null;
   }>(
-    `select mime_type, audio_data from songs
+    `select mime_type, r2_object_key, r2_object_url, audio_data from songs
      where id = $1 and template_id = $2`,
     [songId, id],
   );
@@ -34,16 +38,5 @@ export async function GET(
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  const buf = Buffer.isBuffer(song.audio_data)
-    ? song.audio_data
-    : Buffer.from(song.audio_data as unknown as ArrayBuffer);
-
-  return new NextResponse(new Uint8Array(buf), {
-    status: 200,
-    headers: {
-      "Content-Type": song.mime_type || "audio/ogg",
-      "Cache-Control": "no-store",
-      "Content-Length": String(buf.length),
-    },
-  });
+  return respondWithSongAudio(song);
 }

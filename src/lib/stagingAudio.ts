@@ -7,7 +7,8 @@ import {
 import {
   deleteR2Quiet,
   fetchR2Audio,
-  isR2StagingUrl,
+  headR2Object,
+  isR2Locator,
   parseR2PublicUrl,
   readR2Config,
   r2UploadsEnabled,
@@ -23,15 +24,15 @@ export function resolveUploadMode(): UploadMode {
 }
 
 export function isStagingAudioUrl(url: string): boolean {
-  if (isR2StagingUrl(url) || isVercelBlobUrl(url)) return true;
+  if (isR2Locator(url) || isVercelBlobUrl(url)) return true;
   const config = readR2Config();
   if (config && parseR2PublicUrl(url, config)) return true;
   return false;
 }
 
-/** Download a private staging object (R2 or Vercel Blob) into a Buffer. */
+/** Download a private staging/transient object (R2 or Vercel Blob) into a Buffer. */
 export async function fetchStagingAudio(url: string): Promise<Buffer> {
-  if (isR2StagingUrl(url)) {
+  if (isR2Locator(url)) {
     return fetchR2Audio(url);
   }
   const config = readR2Config();
@@ -44,15 +45,27 @@ export async function fetchStagingAudio(url: string): Promise<Buffer> {
   throw new Error("Invalid audio staging URL");
 }
 
+/**
+ * Delete a *transient* upload only (Vercel Blob).
+ * Durable R2 objects are kept and must not be deleted after template create.
+ */
 export async function deleteStagingQuiet(url: string): Promise<void> {
-  if (isR2StagingUrl(url)) {
-    await deleteR2Quiet(url);
+  if (isVercelBlobUrl(url)) {
+    await deleteBlobQuiet(url);
     return;
   }
-  const config = readR2Config();
-  if (config && parseR2PublicUrl(url, config)) {
-    await deleteR2Quiet(url);
-    return;
-  }
-  await deleteBlobQuiet(url);
+  // R2 uploads are durable — do not delete.
 }
+
+export async function verifyR2Upload(
+  url: string,
+): Promise<{ key: string; contentLength: number; contentType: string | null }> {
+  const meta = await headR2Object(url);
+  return {
+    key: meta.key,
+    contentLength: meta.contentLength,
+    contentType: meta.contentType,
+  };
+}
+
+export { deleteR2Quiet };
