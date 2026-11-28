@@ -33,7 +33,10 @@ export async function GET(
         controller.enqueue(encoder.encode(`data: ${data}\n\n`));
       };
 
-      const initial = await buildSessionState(code, { revealAnswer: isHost });
+      // includeHostAnswer only fills private hostSongName — never public reveal fields.
+      const initial = await buildSessionState(code, {
+        includeHostAnswer: isHost,
+      });
       if (initial) {
         send(
           JSON.stringify({

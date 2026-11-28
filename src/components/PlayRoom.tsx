@@ -163,7 +163,9 @@ export function PlayRoom() {
                 </div>
               )}
 
-              {state?.currentSongName && (
+              {state?.revealAnswer &&
+                state.currentSongName &&
+                (state.status === "revealed" || state.status === "finished") && (
                 <div className="reveal-card">
                   {state.currentCoverArtUrl && (
                     // eslint-disable-next-line @next/next/no-img-element

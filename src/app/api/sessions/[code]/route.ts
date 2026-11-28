@@ -15,7 +15,8 @@ export async function GET(
 
   const hostToken = request.headers.get("x-host-token") ?? "";
   const isHost = Boolean(hostToken && hostToken === session.host_token);
-  const state = await buildSessionState(code);
+  // includeHostAnswer only fills private hostSongName; public reveal is status-only.
+  const state = await buildSessionState(code, { includeHostAnswer: isHost });
   if (!state) {
     return NextResponse.json({ error: "Session not found" }, { status: 404 });
   }

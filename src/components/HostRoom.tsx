@@ -108,7 +108,8 @@ export function HostRoom() {
                   {pointsNow != null ? ` · ${pointsNow} pts` : ""}
                 </p>
 
-                {state.revealAnswer && state.currentSongName && (
+                {(state.status === "revealed" || state.status === "finished") &&
+                  state.currentSongName && (
                   <p className="ok-msg host-track-name">
                     Revealed: {state.currentSongName}
                   </p>
