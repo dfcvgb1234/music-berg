@@ -167,6 +167,8 @@ export async function PUT(
       songs?: Array<{
         itunesTrackId?: string;
         answerIds?: unknown;
+        stagingUrl?: string;
+        /** Legacy alias for stagingUrl. */
         blobUrl?: string;
         keepSongId?: string;
         segmentPointsMs?: unknown;
@@ -185,7 +187,10 @@ export async function PUT(
       answerIds: Array.isArray(s.answerIds)
         ? s.answerIds.map((v) => String(v))
         : [],
-      blobUrl: String(s.blobUrl ?? "").trim() || undefined,
+      stagingUrl:
+        String(s.stagingUrl ?? "").trim() ||
+        String(s.blobUrl ?? "").trim() ||
+        undefined,
       keepSongId: String(s.keepSongId ?? "").trim() || undefined,
       segmentPointsMs: s.segmentPointsMs,
       durationMs: s.durationMs,

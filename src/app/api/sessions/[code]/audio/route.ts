@@ -1,17 +1,16 @@
 import { NextResponse } from "next/server";
-import { contentDispositionForMime, detectAudioMime } from "@/lib/audioMime";
 import { sql } from "@/lib/db";
 import { getSessionByCode } from "@/lib/quiz";
 import { clientKey, rateLimit } from "@/lib/rateLimit";
+import { respondWithSongAudio } from "@/lib/songAudio";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
 /**
- * Host-only session audio. Always returns the full stored file for the current song.
- * Clip length is enforced on the host client (stop timer) so we don't depend
- * on ffmpeg byte-trimming — which is unavailable on Vercel Hobby and produces
- * invalid MP3s that appear silent until Reveal sends the untouched file.
+ * Host-only session audio. Serves the full durable file for the current song
+ * from Cloudflare R2 (stream after host-token auth).
+ * Clip length is enforced on the host client (stop timer).
  */
 export async function GET(
   request: Request,
@@ -55,30 +54,18 @@ export async function GET(
   }
 
   const rows = await sql<{
-    id: string;
-    mime_type: string;
-    audio_data: Uint8Array | Buffer;
-  }>(`select id, mime_type, audio_data from songs where id = $1`, [
-    songMeta.id,
-  ]);
+    mime_type: string | null;
+    r2_object_key: string | null;
+    r2_object_url: string | null;
+  }>(
+    `select mime_type, r2_object_key, r2_object_url
+     from songs where id = $1`,
+    [songMeta.id],
+  );
   const song = rows[0];
   if (!song) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  const bytes = new Uint8Array(Buffer.from(song.audio_data));
-  const mime =
-    song.mime_type?.trim() ||
-    detectAudioMime(bytes, "audio/mpeg");
-
-  return new NextResponse(bytes, {
-    headers: {
-      "Content-Type": mime,
-      "X-Content-Type-Options": "nosniff",
-      "Content-Disposition": contentDispositionForMime(mime),
-      "Content-Length": String(bytes.byteLength),
-      "Cache-Control": "no-store",
-      "Content-Security-Policy": "default-src 'none'; sandbox",
-    },
-  });
+  return respondWithSongAudio(song);
 }

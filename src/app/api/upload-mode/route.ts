@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
-import { blobUploadsEnabled } from "@/lib/blobAudio";
+import { resolveUploadMode } from "@/lib/stagingAudio";
 
 export const runtime = "nodejs";
 
-/** Lets the host UI choose Blob client uploads vs multipart POST. */
+/** Lets the host UI choose R2 / Blob client uploads vs multipart POST. */
 export async function GET() {
   return NextResponse.json({
-    mode: blobUploadsEnabled() ? "blob" : "direct",
+    mode: resolveUploadMode(),
   });
 }

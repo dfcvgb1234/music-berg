@@ -6,6 +6,9 @@
     },
     "src/app/api/blob/upload/route.ts": {
       "maxDuration": 60
+    },
+    "src/app/api/r2/upload/route.ts": {
+      "maxDuration": 60
     }
   }
 }

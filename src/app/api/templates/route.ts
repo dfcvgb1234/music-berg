@@ -64,13 +64,15 @@ export async function POST(request: Request) {
 
   const contentType = request.headers.get("content-type") ?? "";
 
-  // Hobby-safe path: small JSON with private Blob URLs (files already uploaded).
+  // Hobby-safe path: small JSON with private staging URLs (files already uploaded).
   if (contentType.includes("application/json")) {
     const body = (await request.json().catch(() => null)) as {
       name?: string;
       songs?: Array<{
         itunesTrackId?: string;
         answerIds?: unknown;
+        stagingUrl?: string;
+        /** Legacy alias for stagingUrl. */
         blobUrl?: string;
         segmentPointsMs?: unknown;
         durationMs?: unknown;
@@ -88,7 +90,10 @@ export async function POST(request: Request) {
       answerIds: Array.isArray(s.answerIds)
         ? s.answerIds.map((v) => String(v))
         : [],
-      blobUrl: String(s.blobUrl ?? "").trim() || undefined,
+      stagingUrl:
+        String(s.stagingUrl ?? "").trim() ||
+        String(s.blobUrl ?? "").trim() ||
+        undefined,
       segmentPointsMs: s.segmentPointsMs,
       durationMs: s.durationMs,
     }));

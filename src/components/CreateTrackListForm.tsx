@@ -27,7 +27,7 @@ type SongDraft = {
   existingClip?: { file: File; label: string } | null;
 };
 
-type UploadMode = "blob" | "direct" | "unknown";
+type UploadMode = "r2" | "blob" | "direct" | "unknown";
 
 function allAnswerIds(pick: PickedTrack, extras: PickedTrack[]): string[] {
   return [
@@ -127,7 +127,9 @@ export function CreateTrackListForm({
         const res = await fetch("/api/upload-mode", { cache: "no-store" });
         const data = await readApiJson<{ mode?: string }>(res);
         if (!cancelled) {
-          setUploadMode(data.mode === "blob" ? "blob" : "direct");
+          if (data.mode === "r2") setUploadMode("r2");
+          else if (data.mode === "blob") setUploadMode("blob");
+          else setUploadMode("direct");
         }
       } catch {
         if (!cancelled) setUploadMode("direct");
@@ -359,12 +361,12 @@ export function CreateTrackListForm({
       const isEdit = Boolean(editId);
       let res: Response;
 
-      if (uploadMode === "blob") {
+      if (uploadMode === "r2" || uploadMode === "blob") {
         setStatus(isEdit ? "Updating track list…" : "Uploading Opus clips…");
         const payloadSongs: Array<{
           itunesTrackId: string;
           answerIds: string[];
-          blobUrl?: string;
+          stagingUrl?: string;
           keepSongId?: string;
           segmentPointsMs: number[];
           durationMs: number | null;
@@ -377,17 +379,60 @@ export function CreateTrackListForm({
           if (song.audio?.file) {
             setStatus(`Uploading clip ${i + 1}/${songs.length}…`);
             const file = song.audio.file;
-            const blob = await upload(safeAudioBlobPath(file, i), file, {
-              access: "private",
-              handleUploadUrl: "/api/blob/upload",
-              headers,
-              multipart: file.size > 2 * 1024 * 1024,
-              contentType: file.type || OPUS_MIME,
-            });
+            const pathname = safeAudioBlobPath(file, i);
+            const contentType = file.type || OPUS_MIME;
+
+            let stagingUrl: string;
+            if (uploadMode === "r2") {
+              const signRes = await fetch("/api/r2/upload", {
+                method: "POST",
+                headers: {
+                  ...headers,
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                  pathname,
+                  contentType,
+                  contentLength: file.size,
+                }),
+              });
+              const signed = await readApiJson<{
+                error?: string;
+                uploadUrl?: string;
+                stagingUrl?: string;
+                contentType?: string;
+              }>(signRes);
+              if (!signRes.ok || !signed.uploadUrl || !signed.stagingUrl) {
+                throw new Error(signed.error || "Could not start R2 upload");
+              }
+              const putRes = await fetch(signed.uploadUrl, {
+                method: "PUT",
+                headers: {
+                  "Content-Type": signed.contentType || contentType,
+                },
+                body: file,
+              });
+              if (!putRes.ok) {
+                throw new Error(
+                  `R2 upload failed (${putRes.status}). Check bucket CORS for PUT.`,
+                );
+              }
+              stagingUrl = signed.stagingUrl;
+            } else {
+              const blob = await upload(pathname, file, {
+                access: "private",
+                handleUploadUrl: "/api/blob/upload",
+                headers,
+                multipart: file.size > 2 * 1024 * 1024,
+                contentType,
+              });
+              stagingUrl = blob.url;
+            }
+
             payloadSongs.push({
               itunesTrackId: pick.itunesTrackId,
               answerIds: allAnswerIds(pick, song.extraAnswers),
-              blobUrl: blob.url,
+              stagingUrl,
               segmentPointsMs,
               durationMs,
             });
