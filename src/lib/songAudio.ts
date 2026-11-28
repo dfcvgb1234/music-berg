@@ -9,14 +9,12 @@ export type SongAudioRow = {
   mime_type: string | null;
   r2_object_key: string | null;
   r2_object_url: string | null;
-  audio_data: Uint8Array | Buffer | null;
 };
 
 /**
  * Serve durable song audio after the caller has already authorized the request.
- * Streams from Cloudflare R2 when `r2_object_key` is set; falls back to legacy
- * Postgres bytea during migration. Keeps host-only gating on this route (no
- * permanent public redirect).
+ * Streams from Cloudflare R2 when `r2_object_key` (or locator URL) is set.
+ * Keeps host-only gating on this route (no permanent public redirect).
  */
 export async function respondWithSongAudio(
   song: SongAudioRow,
@@ -55,21 +53,6 @@ export async function respondWithSongAudio(
         },
       });
     }
-  }
-
-  if (song.audio_data && (song.audio_data as Uint8Array).byteLength > 0) {
-    const bytes = new Uint8Array(Buffer.from(song.audio_data));
-    const mime = song.mime_type?.trim() || detectAudioMime(bytes, "audio/mpeg");
-    return new Response(bytes, {
-      headers: {
-        "Content-Type": mime,
-        "X-Content-Type-Options": "nosniff",
-        "Content-Disposition": contentDispositionForMime(mime),
-        "Content-Length": String(bytes.byteLength),
-        "Cache-Control": "no-store",
-        "Content-Security-Policy": "default-src 'none'; sandbox",
-      },
-    });
   }
 
   return Response.json({ error: "Audio not found" }, { status: 404 });

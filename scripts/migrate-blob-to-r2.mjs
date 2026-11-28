@@ -107,10 +107,15 @@ async function main() {
         max: 1,
       });
       const { rows } = await pool.query(
-        `select count(*)::int as n from songs where audio_data is not null`,
+        `select
+           count(*)::int as total,
+           count(*) filter (
+             where r2_object_key is not null and btrim(r2_object_key) <> ''
+           )::int as with_r2
+         from songs`,
       );
       console.log(
-        `  postgres: ${rows[0]?.n ?? 0} songs with audio_data (durable store; Blob was staging)`,
+        `  postgres: ${rows[0]?.total ?? 0} songs (${rows[0]?.with_r2 ?? 0} with r2_object_key)`,
       );
       await pool.end();
     } catch (err) {

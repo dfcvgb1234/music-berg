@@ -9,7 +9,7 @@ export const maxDuration = 60;
 
 /**
  * Host-only session audio. Serves the full durable file for the current song
- * from Cloudflare R2 (presigned redirect or stream), with legacy bytea fallback.
+ * from Cloudflare R2 (stream after host-token auth).
  * Clip length is enforced on the host client (stop timer).
  */
 export async function GET(
@@ -57,9 +57,8 @@ export async function GET(
     mime_type: string | null;
     r2_object_key: string | null;
     r2_object_url: string | null;
-    audio_data: Uint8Array | Buffer | null;
   }>(
-    `select mime_type, r2_object_key, r2_object_url, audio_data
+    `select mime_type, r2_object_key, r2_object_url
      from songs where id = $1`,
     [songMeta.id],
   );

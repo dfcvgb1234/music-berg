@@ -96,8 +96,8 @@ function parseDurationMs(raw: unknown): number | null {
   return Math.min(n, 30 * 60 * 1000);
 }
 
-function requireR2ForHosted(): Response | null {
-  if (process.env.DATABASE_URL?.trim() && !r2UploadsEnabled()) {
+function requireR2(): Response | null {
+  if (!r2UploadsEnabled()) {
     return NextResponse.json(
       {
         error:
@@ -120,7 +120,7 @@ export async function validateSongs(
     );
   }
 
-  const r2Missing = requireR2ForHosted();
+  const r2Missing = requireR2();
   if (r2Missing) return r2Missing;
 
   const validated: ValidatedSong[] = [];
@@ -172,13 +172,12 @@ export async function validateSongs(
     if (input.keepSongId && templateId) {
       const existing = await sql<{
         id: string;
-        audio_data: Buffer | null;
         mime_type: string;
         duration_ms: number | null;
         r2_object_key: string | null;
         r2_object_url: string | null;
       }>(
-        `select id, audio_data, mime_type, duration_ms, r2_object_key, r2_object_url
+        `select id, mime_type, duration_ms, r2_object_key, r2_object_url
          from songs where id = $1 and template_id = $2`,
         [input.keepSongId, templateId],
       );
@@ -205,11 +204,6 @@ export async function validateSongs(
         } catch {
           byteLength = 1; // keep song even if head fails transiently
         }
-      } else if (row.audio_data && (row.audio_data as Buffer).byteLength > 0) {
-        buf = Buffer.isBuffer(row.audio_data)
-          ? row.audio_data
-          : Buffer.from(row.audio_data as unknown as ArrayBuffer);
-        byteLength = buf.byteLength;
       } else {
         return NextResponse.json(
           { error: "Existing song has no durable audio" },
@@ -351,12 +345,11 @@ export async function validateSongs(
 async function ensureDurableR2(
   song: ValidatedSong,
   songId: string,
-): Promise<{ key: string | null; url: string | null; audioData: Buffer | null }> {
+): Promise<{ key: string; url: string | null }> {
   if (song.r2ObjectKey) {
     return {
       key: song.r2ObjectKey,
       url: song.r2ObjectUrl ?? null,
-      audioData: null,
     };
   }
 
@@ -370,16 +363,12 @@ async function ensureDurableR2(
       contentType: song.mimeType,
     });
     if (song.deleteBlobUrl) await deleteStagingQuiet(song.deleteBlobUrl);
-    return { key: put.key, url: put.objectUrl, audioData: null };
+    return { key: put.key, url: put.objectUrl };
   }
 
-  // Local / no R2: keep bytea fallback.
-  if (song.buf) {
-    if (song.deleteBlobUrl) await deleteStagingQuiet(song.deleteBlobUrl);
-    return { key: null, url: null, audioData: song.buf };
-  }
-
-  throw new Error("Song has no durable audio source");
+  throw new Error(
+    "Cloudflare R2 is required for durable audio storage (no Postgres bytea)",
+  );
 }
 
 export async function insertSongsForTemplate(
@@ -392,17 +381,16 @@ export async function insertSongsForTemplate(
     const durable = await ensureDurableR2(song, songId);
     await sql(
       `insert into songs (
-         id, template_id, display_name, mime_type, audio_data, sort_order,
+         id, template_id, display_name, mime_type, sort_order,
          itunes_track_id, cover_art_url, artist_credit, itunes_answer_ids,
          answer_fingerprint, segment_points_ms, duration_ms,
          r2_object_key, r2_object_url
-       ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+       ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
       [
         songId,
         templateId,
         song.displayName,
         song.mimeType,
-        durable.audioData,
         i,
         song.itunesTrackId,
         song.coverArtUrl,

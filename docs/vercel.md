@@ -35,16 +35,17 @@ Vercel Hobby rejects request bodies over ~4.5 MB (`FUNCTION_PAYLOAD_TOO_LARGE`).
 3. Allow browser PUT from your app origin in the bucket **CORS** policy (`PUT`, `GET`, `HEAD`; expose `ETag`).
 4. Redeploy.
 
-Flow: browser crops + encodes each track to **Opus 96 kbps (Ogg)** via ffmpeg.wasm, requests a presigned PUT from `/api/r2/upload`, uploads to R2 under `songs/…` → `/api/templates` stores `r2_object_key` / `r2_object_url` in Postgres (**no bytea**). Host playback (`/api/sessions/…/audio`) auth-gates then redirects to a short-lived R2 signed GET (or streams). Without R2, local multipart may still use Postgres bytea as a fallback; production with `DATABASE_URL` requires R2. `postinstall`/`prebuild` copy ffmpeg UMD + wasm into `public/ffmpeg/` (gitignored).
+Flow: browser crops + encodes each track to **Opus 96 kbps (Ogg)** via ffmpeg.wasm, requests a presigned PUT from `/api/r2/upload`, uploads to R2 under `songs/…` → `/api/templates` stores `r2_object_key` / `r2_object_url` in Postgres. Host playback (`/api/sessions/…/audio`) auth-gates then streams from R2. R2 is required for create/edit (no Postgres bytea). `postinstall`/`prebuild` copy ffmpeg UMD + wasm into `public/ffmpeg/` (gitignored).
 
-### Migrate Postgres bytea → R2
+### Verify R2 coverage / drop legacy bytea
 
 ```bash
-npm run migrate:audio-data-to-r2              # dry-run
-npm run migrate:audio-data-to-r2:execute      # upload + set keys + null audio_data
+npm run verify:r2-audio                       # all songs must have r2_object_key
+npm run migrate:audio-data-to-r2              # dry-run (legacy; no-op if column dropped)
+npm run migrate:audio-data-to-r2:execute      # upload stragglers + clear bytea
 ```
 
-Requires `DATABASE_URL` + R2 env vars in the shell / build environment.
+`migrations/010_drop_audio_data.sql` drops `songs.audio_data` after asserting every song has `r2_object_key`. Requires `DATABASE_URL` + R2 env vars in the shell / build environment.
 
 ### Migrate leftover Blob objects → R2
 

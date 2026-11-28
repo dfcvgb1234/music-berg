@@ -27,9 +27,8 @@ export async function GET(
     mime_type: string | null;
     r2_object_key: string | null;
     r2_object_url: string | null;
-    audio_data: Buffer | null;
   }>(
-    `select mime_type, r2_object_key, r2_object_url, audio_data from songs
+    `select mime_type, r2_object_key, r2_object_url from songs
      where id = $1 and template_id = $2`,
     [songId, id],
   );

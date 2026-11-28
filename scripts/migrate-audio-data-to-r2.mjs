@@ -73,6 +73,19 @@ async function main() {
     credentials: { accessKeyId, secretAccessKey },
   });
 
+  const col = await pool.query(
+    `select 1 as ok
+     from information_schema.columns
+     where table_schema = 'public'
+       and table_name = 'songs'
+       and column_name = 'audio_data'`,
+  );
+  if (col.rows.length === 0) {
+    console.log("  songs.audio_data already dropped — nothing to migrate");
+    await pool.end();
+    return;
+  }
+
   // Ensure schema columns exist (009 may already have run via build migrate).
   await pool.query(`
     alter table songs add column if not exists r2_object_key text;
