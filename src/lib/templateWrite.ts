@@ -6,7 +6,10 @@ import {
   isSupportedAudioBuffer,
   uploadLimits,
 } from "@/lib/audioValidate";
-import { deleteBlobQuiet, fetchPrivateBlobAudio } from "@/lib/blobAudio";
+import {
+  deleteStagingQuiet,
+  fetchStagingAudio,
+} from "@/lib/stagingAudio";
 import { normalizeSegmentPointsMs } from "@/lib/clipRules";
 import { sql } from "@/lib/db";
 import {
@@ -43,8 +46,11 @@ export type SongInput = {
   durationMs?: unknown;
   /** Keep audio from an existing song on this template (edit). */
   keepSongId?: string;
-  /** Private Vercel Blob URL (Hobby-safe path). */
-  blobUrl?: string;
+  /**
+   * Private staging locator (Hobby-safe path):
+   * R2 `r2://bucket/key` or Vercel Blob HTTPS URL.
+   */
+  stagingUrl?: string;
   /** Multipart file (local / small direct uploads). */
   file?: File;
 };
@@ -60,7 +66,7 @@ export type ValidatedSong = {
   mimeType: string;
   segmentPointsMs: number[];
   durationMs: number | null;
-  blobUrl?: string;
+  stagingUrl?: string;
 };
 
 function parseDurationMs(raw: unknown): number | null {
@@ -118,7 +124,7 @@ export async function validateSongs(
     let durationMs = parseDurationMs(input.durationMs);
 
     let buf: Buffer;
-    let blobUrl: string | undefined;
+    let stagingUrl: string | undefined;
     let mimeType: string;
 
     if (input.keepSongId && templateId) {
@@ -146,10 +152,10 @@ export async function validateSongs(
       if (durationMs == null && row.duration_ms != null) {
         durationMs = parseDurationMs(row.duration_ms);
       }
-    } else if (input.blobUrl) {
+    } else if (input.stagingUrl) {
       try {
-        buf = await fetchPrivateBlobAudio(input.blobUrl);
-        blobUrl = input.blobUrl;
+        buf = await fetchStagingAudio(input.stagingUrl);
+        stagingUrl = input.stagingUrl;
       } catch (err) {
         return NextResponse.json(
           {
@@ -224,7 +230,7 @@ export async function validateSongs(
       mimeType,
       segmentPointsMs,
       durationMs,
-      blobUrl,
+      stagingUrl,
     });
   }
 
@@ -256,7 +262,7 @@ export async function insertSongsForTemplate(
         song.durationMs,
       ],
     );
-    if (song.blobUrl) await deleteBlobQuiet(song.blobUrl);
+    if (song.stagingUrl) await deleteStagingQuiet(song.stagingUrl);
   }
 }
 

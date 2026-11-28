@@ -13,9 +13,14 @@ Set these in **Project → Settings → Environment Variables** for Production (
 | `DATABASE_URL` | **Yes** | Postgres connection string (Vercel Postgres / Neon / any Postgres). Also set `DATABASE_URL_UNPOOLED` to the same (or unpooled) URL if your provider offers it — used by `scripts/migrate.mjs` at build. |
 | `BERGS_MUSIC_UPLOAD_SECRET` | **Yes** (or legacy name) | Shared secret for creating track lists. Clients send it as header `x-upload-secret`. |
 | `RIFFRUSH_UPLOAD_SECRET` | Legacy alias | Still accepted if `BERGS_MUSIC_UPLOAD_SECRET` is unset. |
-| `BLOB_READ_WRITE_TOKEN` | **Yes (Hobby-safe uploads)** | Read-write token for private Blob store (e.g. `bergs-music-audio`). Enables browser → Blob uploads so `/api/templates` only receives small JSON (avoids the ~4.5 MB function body cap on Hobby). |
-| `BLOB_STORE_ID` | Optional | Added automatically when the Blob store is connected via the dashboard. |
-| `VERCEL_SUPPORT_LARGE_REQUEST_BODY` | Optional | Only helps on Pro/Enterprise with **Performance (4GB)** Function CPU (20 MiB body beta). **Hobby cannot use Performance**, so prefer Blob uploads instead. |
+| `R2_ACCOUNT_ID` | **Yes (preferred Hobby-safe uploads)** | Cloudflare account id for R2. |
+| `R2_ACCESS_KEY_ID` | **Yes (with R2)** | R2 API token access key id. |
+| `R2_SECRET_ACCESS_KEY` | **Yes (with R2)** | R2 API token secret. |
+| `R2_BUCKET` | Optional | Defaults to `music-berg`. |
+| `R2_PUBLIC_BASE_URL` | Optional | Custom/public base URL (no trailing slash). Used for CSP `connect-src` and accepting public object URLs; staging uploads use private `r2://bucket/key` locators. |
+| `BLOB_READ_WRITE_TOKEN` | Optional fallback | Legacy Vercel Blob staging. Used only when R2 is unset. Also needed for `npm run migrate:blob-to-r2`. |
+| `BLOB_STORE_ID` | Optional | Added automatically when a Blob store is connected via the dashboard. |
+| `VERCEL_SUPPORT_LARGE_REQUEST_BODY` | Optional | Only helps on Pro/Enterprise with **Performance (4GB)** Function CPU (20 MiB body beta). **Hobby cannot use Performance**, so prefer R2 (or Blob) client uploads instead. |
 
 Generate a strong secret, e.g. `openssl rand -hex 24`.
 
@@ -23,13 +28,31 @@ Generate a strong secret, e.g. `openssl rand -hex 24`.
 
 Vercel Hobby rejects request bodies over ~4.5 MB (`FUNCTION_PAYLOAD_TOO_LARGE`). Local `next start` has no such cap.
 
-**Preferred path (Hobby-safe):** connect a **private** Vercel Blob store and set `BLOB_READ_WRITE_TOKEN`.
+**Preferred path (Hobby-safe):** Cloudflare R2 bucket `music-berg` with `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` (and optional `R2_BUCKET` / `R2_PUBLIC_BASE_URL`).
 
-1. Create/connect private Blob store `bergs-music-audio` to project `bergs-music`.
-2. Ensure the connection includes a **read-write token** env var (`BLOB_READ_WRITE_TOKEN`).
-3. Redeploy.
+1. Create an R2 bucket (name `music-berg`) and an API token with Object Read & Write.
+2. Set the R2 env vars on the Vercel project (Production + Preview as needed).
+3. Allow browser PUT from your app origin in the bucket **CORS** policy (`PUT`, `GET`, `HEAD`; expose `ETag`).
+4. Redeploy.
 
-Flow: browser crops + encodes each track to **Opus 96 kbps (Ogg)** via ffmpeg.wasm, uploads the clip to Blob (`/api/blob/upload` token exchange) → `/api/templates` receives JSON with Blob URLs → server pulls bytes from Blob into Postgres. Without `BLOB_READ_WRITE_TOKEN`, the UI falls back to multipart POST of the same Opus files (fine locally). `postinstall`/`prebuild` copy ffmpeg UMD + wasm into `public/ffmpeg/` (gitignored).
+Flow: browser crops + encodes each track to **Opus 96 kbps (Ogg)** via ffmpeg.wasm, requests a presigned PUT from `/api/r2/upload`, uploads to R2 → `/api/templates` receives JSON with `stagingUrl` (`r2://…`) → server pulls bytes from R2 into Postgres and deletes the staging object. If R2 is unset but `BLOB_READ_WRITE_TOKEN` is set, the legacy Blob client-upload path is used. Without either, the UI falls back to multipart POST (fine locally). `postinstall`/`prebuild` copy ffmpeg UMD + wasm into `public/ffmpeg/` (gitignored).
+
+### Migrate leftover Blob objects → R2
+
+Durable clips already live in Postgres after template create. This copies any **remaining** Vercel Blob objects into R2:
+
+```bash
+# dry-run (default)
+npm run migrate:blob-to-r2
+
+# copy
+npm run migrate:blob-to-r2:execute
+
+# copy then delete Blob sources
+node scripts/migrate-blob-to-r2.mjs --execute --delete-source
+```
+
+Requires `BLOB_READ_WRITE_TOKEN` plus the R2 env vars in the shell (e.g. `vercel env pull` once they exist on the project).
 
 ### Attach Postgres
 

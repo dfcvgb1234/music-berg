@@ -17,4 +17,4 @@ Realtime music quiz: short clips, longer extends, race the room to name the trac
 
 ## Deploy on Vercel
 
-See [docs/vercel.md](docs/vercel.md). You need `DATABASE_URL` (Postgres), an upload secret, and for Hobby-safe ~5MB MP3s: a private Blob store with `BLOB_READ_WRITE_TOKEN` (client uploads bypass the 4.5MB function body cap).
+See [docs/vercel.md](docs/vercel.md). You need `DATABASE_URL` (Postgres), an upload secret, and for Hobby-safe uploads: Cloudflare R2 (`R2_ACCOUNT_ID` / `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY`, bucket `music-berg`). Legacy `BLOB_READ_WRITE_TOKEN` remains a fallback.
