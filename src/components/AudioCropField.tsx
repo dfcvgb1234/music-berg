@@ -44,6 +44,11 @@ type Props = {
   existingClip?: { file: File; label: string } | null;
   onClearExisting?: () => void;
   disabled?: boolean;
+  /**
+   * Programmatic source inject (e.g. YouTube download). When `token`
+   * changes, loads `file` as if the host picked it from disk.
+   */
+  injectFile?: { file: File; token: number } | null;
 };
 
 function fmtTime(sec: number): string {
@@ -78,6 +83,7 @@ export function AudioCropField({
   existingClip = null,
   onClearExisting,
   disabled,
+  injectFile = null,
 }: Props) {
   const uid = useId();
   const inputId = idProp ?? `audio-crop-${uid}`;
@@ -177,13 +183,16 @@ export function AudioCropField({
     onChange(null);
   };
 
+  /** Source MP3s (esp. YouTube 196k) can exceed the 6 MB Opus upload cap; crop shrinks them. */
+  const maxSourceBytes = uploadLimits.maxFileBytes * 4;
+
   const onPickFile = async (file: File | null) => {
     reset();
     onClearExisting?.();
     if (!file) return;
-    if (file.size > uploadLimits.maxFileBytes * 2) {
+    if (file.size > maxSourceBytes) {
       setLocalError(
-        `File is too large to process (max ~${formatBytes(uploadLimits.maxFileBytes * 2)}).`,
+        `File is too large to process (max ~${formatBytes(maxSourceBytes)}).`,
       );
       return;
     }
@@ -206,6 +215,13 @@ export function AudioCropField({
       setSource(null);
     }
   };
+
+  // YouTube / CLI inject — load when token changes.
+  useEffect(() => {
+    if (!injectFile?.file || !injectFile.token) return;
+    void onPickFile(injectFile.file);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only react to token
+  }, [injectFile?.token]);
 
   const applyCropPreview = () => {
     const el = previewRef.current;

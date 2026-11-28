@@ -697,7 +697,8 @@ textarea {
       "audio audio";
   }
 
-  .song-row-multi > .audio-crop-field {
+  .song-row-multi > .audio-crop-field,
+  .song-row-multi > .song-audio-block {
     grid-area: audio;
   }
 
@@ -705,9 +706,47 @@ textarea {
     grid-area: side;
   }
 
-  .song-row-multi > :not(.audio-crop-field):not(.song-row-side) {
+  .song-row-multi > :not(.audio-crop-field):not(.song-audio-block):not(.song-row-side) {
     grid-area: picker;
   }
+}
+
+.song-audio-block {
+  display: grid;
+  gap: 0.65rem;
+  min-width: 0;
+  width: 100%;
+}
+
+.youtube-playlist-import {
+  margin: 0.25rem 0 0.5rem;
+}
+
+.youtube-url-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.youtube-url-row input {
+  flex: 1 1 14rem;
+  min-width: 0;
+}
+
+.youtube-url-import {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.youtube-url-label {
+  font-size: 0.85rem;
+  color: var(--steel);
+}
+
+.youtube-url-hint {
+  margin: 0.35rem 0 0;
+  font-size: 0.8rem;
 }
 
 .audio-crop-field {

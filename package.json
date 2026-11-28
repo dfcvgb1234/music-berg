@@ -13,7 +13,8 @@
     "migrate:blob-to-r2:execute": "node scripts/migrate-blob-to-r2.mjs --execute",
     "migrate:audio-data-to-r2": "node scripts/migrate-audio-data-to-r2.mjs",
     "migrate:audio-data-to-r2:execute": "node scripts/migrate-audio-data-to-r2.mjs --execute",
-    "verify:r2-audio": "node scripts/verify-r2-audio.mjs"
+    "verify:r2-audio": "node scripts/verify-r2-audio.mjs",
+    "import:youtube": "node scripts/import-youtube.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1179.0",
