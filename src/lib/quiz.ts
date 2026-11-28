@@ -54,12 +54,13 @@ export type SessionState = {
   playToken: number;
   playStartedAt: string | null;
   currentSongId: string | null;
-  /** Public answer when revealed; otherwise null for participants */
+  /** Public answer only when status is revealed/finished; never mid-round */
   currentSongName: string | null;
-  /** Cover art URL when revealed; otherwise null */
+  /** Cover art URL only when status is revealed/finished; otherwise null */
   currentCoverArtUrl: string | null;
-  /** Always set for host clients; stripped in publicState */
+  /** Host-only answer hint; stripped in publicState — never paint on the big screen */
   hostSongName: string | null;
+  /** True only when the answer is publicly revealed (status revealed/finished) */
   revealAnswer: boolean;
   participants: ParticipantView[];
   everyoneCorrect: boolean;
@@ -139,7 +140,16 @@ export async function getSessionByCode(code: string): Promise<SessionRow | null>
 
 export async function buildSessionState(
   code: string,
-  opts: { revealAnswer?: boolean } = {},
+  opts: {
+    /**
+     * When true (host SSE), include private `hostSongName`.
+     * Must NOT force public `currentSongName` / `revealAnswer` — that leaked
+     * the first track on the big screen until the next poll cleared it.
+     */
+    includeHostAnswer?: boolean;
+    /** @deprecated Use includeHostAnswer; kept so old call sites stay typed. */
+    revealAnswer?: boolean;
+  } = {},
 ): Promise<SessionState | null> {
   const session = await getSessionByCode(code);
   if (!session) return null;
@@ -173,10 +183,12 @@ export async function buildSessionState(
   );
   const lockedSet = new Set(roundGuesses.map((g) => g.participant_id));
 
+  // Public reveal is status-only. Host token must never flip this — otherwise
+  // HostRoom paints "Revealed: …" on join/start before the host hits Reveal.
   const reveal =
-    opts.revealAnswer === true ||
-    session.status === "finished" ||
-    session.status === "revealed";
+    session.status === "finished" || session.status === "revealed";
+  const includeHostAnswer =
+    opts.includeHostAnswer === true || opts.revealAnswer === true;
 
   const participantViews: ParticipantView[] = participants.map((p) => ({
     id: p.id,
@@ -208,6 +220,8 @@ export async function buildSessionState(
     extendCount,
   };
 
+  const songName = currentSong?.display_name ?? null;
+
   return {
     code: session.code,
     status: session.status,
@@ -234,10 +248,10 @@ export async function buildSessionState(
       : null,
     currentSongId: currentSong?.id ?? null,
     // Only after host reveal / finish — never leak the answer on the big screen mid-round.
-    currentSongName: reveal && currentSong ? currentSong.display_name : null,
-    currentCoverArtUrl:
-      reveal && currentSong ? currentSong.cover_art_url : null,
-    hostSongName: null,
+    currentSongName: reveal ? songName : null,
+    currentCoverArtUrl: reveal ? (currentSong?.cover_art_url ?? null) : null,
+    hostSongName:
+      (includeHostAnswer || reveal) && songName ? songName : null,
     revealAnswer: reveal,
     participants: participantViews,
     everyoneCorrect,
@@ -252,7 +266,7 @@ export async function buildSessionState(
 
 export async function broadcastSession(
   code: string,
-  opts: { revealAnswer?: boolean } = {},
+  opts: { includeHostAnswer?: boolean; revealAnswer?: boolean } = {},
 ): Promise<SessionState | null> {
   const state = await buildSessionState(code, opts);
   if (state) publish(code, { type: "state", state });
@@ -265,5 +279,6 @@ export function publicState(state: SessionState): SessionState {
     hostSongName: null,
     currentSongName: state.revealAnswer ? state.currentSongName : null,
     currentCoverArtUrl: state.revealAnswer ? state.currentCoverArtUrl : null,
+    revealAnswer: state.revealAnswer === true,
   };
 }
