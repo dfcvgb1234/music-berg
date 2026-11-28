@@ -10,6 +10,7 @@ export function useSessionStream(
   const [state, setState] = useState<SessionState | null>(null);
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [missing, setMissing] = useState(false);
   const hostToken = opts.hostToken ?? null;
   const enabled = opts.enabled !== false && Boolean(code);
 
@@ -22,6 +23,7 @@ export function useSessionStream(
     let closed = false;
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
     const abort = new AbortController();
+    setMissing(false);
 
     const connect = async () => {
       try {
@@ -38,6 +40,14 @@ export function useSessionStream(
             signal: abort.signal,
           },
         );
+        if (res.status === 404) {
+          if (!closed) {
+            setMissing(true);
+            setConnected(false);
+            setState(null);
+          }
+          return;
+        }
         if (!res.ok || !res.body) {
           throw new Error("SSE failed");
         }
@@ -92,8 +102,15 @@ export function useSessionStream(
           headers,
           cache: "no-store",
         });
+        if (res.status === 404) {
+          setMissing(true);
+          setState(null);
+          setConnected(false);
+          return;
+        }
         if (!res.ok) return;
         const data = (await res.json()) as { state: SessionState };
+        setMissing(false);
         setState(data.state);
       } catch {
         // ignore
@@ -110,5 +127,5 @@ export function useSessionStream(
     };
   }, [code, enabled, hostToken]);
 
-  return { state, setState, connected, error, setError };
+  return { state, setState, connected, error, setError, missing };
 }

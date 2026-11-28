@@ -9,11 +9,11 @@ import {
   type HostVisualizerHandle,
 } from "@/components/HostVisualizer";
 import { Scoreboard } from "@/components/Scoreboard";
+import { formatClipSeconds, pointsForClip } from "@/lib/clipRules";
 import {
-  formatClipSeconds,
-  nextExtendDeltaMs,
-  pointsForClip,
-} from "@/lib/clipRules";
+  clearMembershipForCode,
+  readHostToken,
+} from "@/lib/sessionLocal";
 import { useSessionStream } from "@/lib/useSessionStream";
 
 export function HostRoom() {
@@ -25,13 +25,22 @@ export function HostRoom() {
   const vizRef = useRef<HostVisualizerHandle | null>(null);
 
   useEffect(() => {
-    setHostToken(localStorage.getItem(`riffrush-host-${code}`));
+    setHostToken(readHostToken(code));
   }, [code]);
 
-  const { state, setState, connected } = useSessionStream(code, {
+  const { state, setState, connected, missing } = useSessionStream(code, {
     hostToken,
     enabled: Boolean(hostToken),
   });
+
+  // Finished → drop active-host pointer; gone/expired → wipe host token too.
+  useEffect(() => {
+    if (missing) {
+      clearMembershipForCode(code, { clearCreds: true });
+    } else if (state?.status === "finished") {
+      clearMembershipForCode(code);
+    }
+  }, [missing, state?.status, code]);
 
   const run = (path: "play" | "extend" | "reveal" | "next") => {
     void vizRef.current?.runFromGesture(path);
@@ -52,7 +61,11 @@ export function HostRoom() {
   }
 
   const pointsNow =
-    state?.status === "playing" ? pointsForClip(state.clipMs) : null;
+    state?.status === "playing"
+      ? (state.pointsNow ?? pointsForClip(state.clipMs, state.extendCount))
+      : null;
+  const nextCost =
+    state?.status === "playing" ? (state.nextExtendCost ?? 0) : 0;
   const finished = state?.status === "finished";
 
   return (
@@ -70,11 +83,17 @@ export function HostRoom() {
 
       {finished ? (
         <div className="host-stage-body host-stage-finish">
-          <FinishScreen participants={state.participants} />
-          <div className="actions" style={{ justifyContent: "center" }}>
-            <Link className="btn" href="/host">
-              New quiz
-            </Link>
+          <div className="finish-wrap">
+            <FinishScreen participants={state.participants} />
+            <div className="actions finish-actions">
+              <Link
+                className="btn"
+                href="/host"
+                onClick={() => clearMembershipForCode(code, { clearCreds: true })}
+              >
+                New quiz
+              </Link>
+            </div>
           </div>
         </div>
       ) : (
@@ -123,11 +142,24 @@ export function HostRoom() {
                   </button>
                   <button
                     className="btn secondary"
-                    disabled={busy || state.status !== "playing"}
+                    disabled={
+                      busy ||
+                      state.status !== "playing" ||
+                      state.canExtend === false ||
+                      !(state.nextExtendMs > 0)
+                    }
                     onClick={() => run("extend")}
                   >
                     Unlock +
-                    {formatClipSeconds(nextExtendDeltaMs(state.clipMs))}s
+                    {formatClipSeconds(state.nextExtendMs ?? 0)}s
+                    {nextCost > 0 ? ` (−${nextCost})` : ""}
+                    {state.segmentPointsMs?.length
+                      ? " · segment"
+                      : state.durationMs != null &&
+                          state.clipMs + (state.nextExtendMs ?? 0) >=
+                            state.durationMs
+                        ? " · full"
+                        : ""}
                   </button>
                   <button
                     className="btn secondary"

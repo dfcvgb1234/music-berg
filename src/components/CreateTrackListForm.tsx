@@ -4,10 +4,12 @@ import { upload } from "@vercel/blob/client";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   AudioCropField,
+  remapSegmentsToCrop,
   type PreparedAudio,
 } from "@/components/AudioCropField";
 import { TrackPicker, type PickedTrack } from "@/components/TrackPicker";
 import { OPUS_MIME } from "@/lib/audioMime";
+import { probeAudioDuration } from "@/lib/clientOpusEncode";
 import { readApiJson } from "@/lib/readApiJson";
 import { formatBytes, uploadLimits } from "@/lib/uploadLimits";
 
@@ -16,6 +18,13 @@ type SongDraft = {
   pick: PickedTrack | null;
   extraAnswers: PickedTrack[];
   audio: PreparedAudio | null;
+  /** Absolute segment times on the visualized file (source or existing clip). */
+  segmentPointsSec: number[];
+  /** Cropped clip length in ms (for non-segmented full-track unlock). */
+  durationMs?: number | null;
+  /** Existing DB song — keep audio when `audio` is null. */
+  existingSongId?: string;
+  existingClip?: { file: File; label: string } | null;
 };
 
 type UploadMode = "blob" | "direct" | "unknown";
@@ -59,15 +68,46 @@ function emptySong(seq: number): SongDraft {
     pick: null,
     extraAnswers: [],
     audio: null,
+    segmentPointsSec: [],
   };
+}
+
+function segmentPointsMsFromDraft(song: SongDraft): number[] {
+  if (song.audio?.file) {
+    return song.audio.segmentPointsSec.map((s) => Math.round(s * 1000));
+  }
+  // Existing clip: segmentPointsSec are already relative to clip start.
+  if (song.existingSongId) {
+    return song.segmentPointsSec.map((s) => Math.round(s * 1000));
+  }
+  // Pre-encode absolute markers — only used after convert via PreparedAudio.
+  return remapSegmentsToCrop(
+    song.segmentPointsSec,
+    song.audio?.startSec ?? 0,
+    song.audio?.endSec ?? Number.POSITIVE_INFINITY,
+  ).map((s) => Math.round(s * 1000));
+}
+
+function durationMsFromDraft(song: SongDraft): number | null {
+  if (song.audio?.file) {
+    const ms = Math.round((song.audio.endSec - song.audio.startSec) * 1000);
+    return ms >= 500 ? ms : null;
+  }
+  if (song.durationMs != null && song.durationMs >= 500) {
+    return Math.round(song.durationMs);
+  }
+  return null;
 }
 
 export function CreateTrackListForm({
   onCreated,
   onCancel,
+  editId = null,
 }: {
   onCreated?: (trackList: { id: string; name: string; songCount: number }) => void;
   onCancel?: () => void;
+  /** When set, load and PUT this track list instead of creating. */
+  editId?: string | null;
 }) {
   const seqRef = useRef(1);
   const [name, setName] = useState("");
@@ -76,6 +116,8 @@ export function CreateTrackListForm({
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [loadingEdit, setLoadingEdit] = useState(false);
+  const [editLoaded, setEditLoaded] = useState(!editId);
   const [uploadMode, setUploadMode] = useState<UploadMode>("unknown");
 
   useEffect(() => {
@@ -96,12 +138,123 @@ export function CreateTrackListForm({
     };
   }, []);
 
+  const loadEdit = async () => {
+    if (!editId) return;
+    setLoadingEdit(true);
+    setError(null);
+    try {
+      const headers: HeadersInit = {};
+      const secret = uploadSecret.trim();
+      if (secret) headers["x-upload-secret"] = secret;
+      const res = await fetch(`/api/templates/${encodeURIComponent(editId)}`, {
+        cache: "no-store",
+        headers,
+      });
+      const data = await readApiJson<{
+        error?: string;
+        name?: string;
+        songs?: Array<{
+          id: string;
+          segmentPointsMs?: number[];
+          durationMs?: number | null;
+          pick: PickedTrack | null;
+          extraAnswers?: PickedTrack[];
+          displayName?: string;
+          mimeType?: string;
+        }>;
+      }>(res);
+      if (!res.ok) throw new Error(data.error || "Could not load track list");
+      setName(data.name ?? "");
+      const drafts: SongDraft[] = [];
+      for (let i = 0; i < (data.songs ?? []).length; i++) {
+        const song = data.songs![i];
+        seqRef.current += 1;
+        drafts.push({
+          key: newSongKey(seqRef.current),
+          pick: song.pick,
+          extraAnswers: song.extraAnswers ?? [],
+          audio: null,
+          segmentPointsSec: (song.segmentPointsMs ?? []).map((ms) => ms / 1000),
+          durationMs: song.durationMs ?? null,
+          existingSongId: song.id,
+          existingClip: null,
+        });
+      }
+      setSongs(drafts.length ? drafts : [emptySong(1)]);
+      setEditLoaded(true);
+
+      for (let i = 0; i < drafts.length; i++) {
+        const song = data.songs![i];
+        try {
+          const audioRes = await fetch(
+            `/api/templates/${encodeURIComponent(editId)}/audio?songId=${encodeURIComponent(song.id)}`,
+            { headers, cache: "no-store" },
+          );
+          if (!audioRes.ok) continue;
+          const blob = await audioRes.blob();
+          const ext =
+            (song.mimeType || "").includes("webm")
+              ? "webm"
+              : (song.mimeType || "").includes("mpeg")
+                ? "mp3"
+                : "ogg";
+          const file = new File(
+            [blob],
+            `${song.displayName || `song-${i + 1}`}.${ext}`,
+            { type: song.mimeType || OPUS_MIME },
+          );
+          let probedMs: number | null = null;
+          try {
+            const sec = await probeAudioDuration(file);
+            if (Number.isFinite(sec) && sec > 0) {
+              probedMs = Math.round(sec * 1000);
+            }
+          } catch {
+            /* keep stored duration */
+          }
+          setSongs((prev) =>
+            prev.map((s) =>
+              s.existingSongId === song.id
+                ? {
+                    ...s,
+                    durationMs: s.durationMs ?? probedMs,
+                    existingClip: {
+                      file,
+                      label: song.displayName || file.name,
+                    },
+                  }
+                : s,
+            ),
+          );
+        } catch {
+          /* keep without waveform */
+        }
+      }
+    } catch (err) {
+      setEditLoaded(false);
+      setError(err instanceof Error ? err.message : "Failed to load");
+    } finally {
+      setLoadingEdit(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!editId) {
+      setEditLoaded(true);
+      return;
+    }
+    // Auto-load once (local / secret already typed). Hosted 401 → enter secret + Load.
+    void loadEdit();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional one-shot per editId
+  }, [editId]);
+
   const totalAudioBytes = useMemo(
     () =>
-      songs.reduce(
-        (sum, s) => sum + (s.audio?.file?.size ?? 0),
-        0,
-      ),
+      songs.reduce((sum, s) => {
+        if (s.audio?.file) return sum + s.audio.file.size;
+        if (s.existingClip?.file) return sum + s.existingClip.file.size;
+        return sum;
+      }, 0),
     [songs],
   );
 
@@ -112,15 +265,17 @@ export function CreateTrackListForm({
     songs.forEach((s, i) => {
       const n = i + 1;
       if (!s.pick) missingPick.push(n);
-      else if (!s.audio?.file) missingAudio.push(n);
-      else if (s.audio.file.size > uploadLimits.maxFileBytes) tooLarge.push(n);
+      else if (!s.audio?.file && !s.existingSongId) missingAudio.push(n);
+      else if (s.audio?.file && s.audio.file.size > uploadLimits.maxFileBytes) {
+        tooLarge.push(n);
+      }
     });
     return { missingPick, missingAudio, tooLarge };
   }, [songs]);
 
   const saveBlockers = useMemo(() => {
     const reasons: string[] = [];
-    if (busy) reasons.push("Save in progress…");
+    if (busy || loadingEdit) reasons.push(loadingEdit ? "Loading…" : "Save in progress…");
     if (uploadMode === "unknown") {
       reasons.push("Checking upload mode…");
     }
@@ -156,11 +311,11 @@ export function CreateTrackListForm({
       );
     }
     return reasons;
-  }, [busy, uploadMode, name, incomplete, totalAudioBytes]);
+  }, [busy, loadingEdit, uploadMode, name, incomplete, totalAudioBytes]);
 
   const canSave = saveBlockers.length === 0;
 
-  const onCreate = async (e: FormEvent) => {
+  const onSave = async (e: FormEvent) => {
     e.preventDefault();
     if (!canSave) {
       setError(saveBlockers[0] ?? "Cannot save yet");
@@ -172,17 +327,24 @@ export function CreateTrackListForm({
     try {
       let total = 0;
       for (const song of songs) {
-        if (!song.pick || !song.audio?.file) {
+        if (!song.pick) {
+          throw new Error("Each song needs a track pick");
+        }
+        if (!song.audio?.file && !song.existingSongId) {
           throw new Error(
-            "Each song needs a track pick and a converted Opus clip",
+            "Each song needs a converted Opus clip or an existing clip",
           );
         }
-        if (song.audio.file.size > uploadLimits.maxFileBytes) {
-          throw new Error(
-            `“${song.audio.sourceName}” is too large after encode (max ${formatBytes(uploadLimits.maxFileBytes)}).`,
-          );
+        if (song.audio?.file) {
+          if (song.audio.file.size > uploadLimits.maxFileBytes) {
+            throw new Error(
+              `“${song.audio.sourceName}” is too large after encode (max ${formatBytes(uploadLimits.maxFileBytes)}).`,
+            );
+          }
+          total += song.audio.file.size;
+        } else if (song.existingClip?.file) {
+          total += song.existingClip.file.size;
         }
-        total += song.audio.file.size;
       }
       if (total > uploadLimits.maxTemplateAudioBytes) {
         throw new Error(
@@ -194,46 +356,70 @@ export function CreateTrackListForm({
       const headers: HeadersInit = {};
       if (secret) headers["x-upload-secret"] = secret;
 
+      const isEdit = Boolean(editId);
       let res: Response;
+
       if (uploadMode === "blob") {
-        setStatus("Uploading Opus clips…");
+        setStatus(isEdit ? "Updating track list…" : "Uploading Opus clips…");
         const payloadSongs: Array<{
           itunesTrackId: string;
           answerIds: string[];
-          blobUrl: string;
+          blobUrl?: string;
+          keepSongId?: string;
+          segmentPointsMs: number[];
+          durationMs: number | null;
         }> = [];
         for (let i = 0; i < songs.length; i++) {
           const song = songs[i];
           const pick = song.pick!;
-          const file = song.audio!.file;
-          setStatus(`Uploading clip ${i + 1}/${songs.length}…`);
-          const blob = await upload(safeAudioBlobPath(file, i), file, {
-            access: "private",
-            handleUploadUrl: "/api/blob/upload",
-            headers,
-            multipart: file.size > 2 * 1024 * 1024,
-            contentType: file.type || OPUS_MIME,
-          });
-          payloadSongs.push({
-            itunesTrackId: pick.itunesTrackId,
-            answerIds: allAnswerIds(pick, song.extraAnswers),
-            blobUrl: blob.url,
-          });
+          const segmentPointsMs = segmentPointsMsFromDraft(song);
+          const durationMs = durationMsFromDraft(song);
+          if (song.audio?.file) {
+            setStatus(`Uploading clip ${i + 1}/${songs.length}…`);
+            const file = song.audio.file;
+            const blob = await upload(safeAudioBlobPath(file, i), file, {
+              access: "private",
+              handleUploadUrl: "/api/blob/upload",
+              headers,
+              multipart: file.size > 2 * 1024 * 1024,
+              contentType: file.type || OPUS_MIME,
+            });
+            payloadSongs.push({
+              itunesTrackId: pick.itunesTrackId,
+              answerIds: allAnswerIds(pick, song.extraAnswers),
+              blobUrl: blob.url,
+              segmentPointsMs,
+              durationMs,
+            });
+          } else {
+            payloadSongs.push({
+              itunesTrackId: pick.itunesTrackId,
+              answerIds: allAnswerIds(pick, song.extraAnswers),
+              keepSongId: song.existingSongId,
+              segmentPointsMs,
+              durationMs,
+            });
+          }
         }
-        setStatus("Saving track list…");
-        res = await fetch("/api/templates", {
-          method: "POST",
-          headers: {
-            ...headers,
-            "Content-Type": "application/json",
+        setStatus(isEdit ? "Saving changes…" : "Saving track list…");
+        res = await fetch(
+          isEdit
+            ? `/api/templates/${encodeURIComponent(editId!)}`
+            : "/api/templates",
+          {
+            method: isEdit ? "PUT" : "POST",
+            headers: {
+              ...headers,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              name: name.trim(),
+              songs: payloadSongs,
+            }),
           },
-          body: JSON.stringify({
-            name: name.trim(),
-            songs: payloadSongs,
-          }),
-        });
+        );
       } else {
-        setStatus("Saving track list…");
+        setStatus(isEdit ? "Saving changes…" : "Saving track list…");
         const form = new FormData();
         form.set("name", name.trim());
         for (const song of songs) {
@@ -243,13 +429,35 @@ export function CreateTrackListForm({
             "itunesAnswerIds",
             JSON.stringify(allAnswerIds(pick, song.extraAnswers)),
           );
-          form.append("songFiles", song.audio!.file);
+          form.append(
+            "segmentPointsMs",
+            JSON.stringify(segmentPointsMsFromDraft(song)),
+          );
+          form.append(
+            "durationMs",
+            String(durationMsFromDraft(song) ?? ""),
+          );
+          if (song.audio?.file) {
+            form.append("songFiles", song.audio.file);
+            form.append("keepSongIds", "");
+          } else {
+            form.append(
+              "songFiles",
+              new File([], "keep.bin", { type: "application/octet-stream" }),
+            );
+            form.append("keepSongIds", song.existingSongId ?? "");
+          }
         }
-        res = await fetch("/api/templates", {
-          method: "POST",
-          body: form,
-          headers,
-        });
+        res = await fetch(
+          isEdit
+            ? `/api/templates/${encodeURIComponent(editId!)}`
+            : "/api/templates",
+          {
+            method: isEdit ? "PUT" : "POST",
+            body: form,
+            headers,
+          },
+        );
       }
 
       const data = await readApiJson<{
@@ -259,10 +467,16 @@ export function CreateTrackListForm({
         songCount?: number;
       }>(res);
       if (!res.ok) throw new Error(data.error || "Could not save track list");
-      setStatus(`Saved track list “${data.name}”`);
-      setName("");
-      seqRef.current += 1;
-      setSongs([emptySong(seqRef.current)]);
+      setStatus(
+        isEdit
+          ? `Updated track list “${data.name}”`
+          : `Saved track list “${data.name}”`,
+      );
+      if (!isEdit) {
+        setName("");
+        seqRef.current += 1;
+        setSongs([emptySong(seqRef.current)]);
+      }
       if (data.id && data.name) {
         onCreated?.({
           id: data.id,
@@ -279,17 +493,62 @@ export function CreateTrackListForm({
   };
 
   const songStatus = (song: SongDraft) => {
-    if (!song.pick && !song.audio?.file) return "Needs track + Opus convert";
+    if (!song.pick && !song.audio?.file && !song.existingSongId) {
+      return "Needs track + Opus convert";
+    }
     if (!song.pick) return "Needs Deezer track pick";
-    if (!song.audio?.file) return "Needs Convert to Opus";
-    if (song.audio.file.size > uploadLimits.maxFileBytes) {
+    if (!song.audio?.file && !song.existingSongId) return "Needs Convert to Opus";
+    if (song.audio?.file && song.audio.file.size > uploadLimits.maxFileBytes) {
       return `Encoded file too large (${formatBytes(song.audio.file.size)})`;
     }
-    return `Ready · ${formatBytes(song.audio.file.size)}`;
+    const segs =
+      (song.audio?.segmentPointsSec?.length ?? 0) ||
+      song.segmentPointsSec.length;
+    const segLabel =
+      segs > 0 ? ` · ${segs} segment${segs === 1 ? "" : "s"}` : "";
+    if (song.audio?.file) {
+      return `Ready · ${formatBytes(song.audio.file.size)}${segLabel}`;
+    }
+    return `Keeping existing clip${segLabel}`;
   };
 
+  if (editId && !editLoaded) {
+    return (
+      <div className="stack">
+        <div className="field">
+          <label htmlFor="upload-secret-load">Upload secret</label>
+          <input
+            id="upload-secret-load"
+            type="password"
+            autoComplete="off"
+            value={uploadSecret}
+            onChange={(e) => setUploadSecret(e.target.value)}
+            placeholder="Required on the published app"
+          />
+        </div>
+        <div className="actions">
+          <button
+            type="button"
+            className="btn"
+            disabled={loadingEdit}
+            onClick={() => void loadEdit()}
+          >
+            {loadingEdit ? "Loading…" : "Load track list"}
+          </button>
+          {onCancel && (
+            <button type="button" className="btn secondary" onClick={onCancel}>
+              Cancel
+            </button>
+          )}
+        </div>
+        {error && <p className="error">{error}</p>}
+        {loadingEdit && <p className="muted">Loading track list…</p>}
+      </div>
+    );
+  }
+
   return (
-    <form className="stack" onSubmit={onCreate}>
+    <form className="stack" onSubmit={onSave}>
       <div className="field">
         <label htmlFor="track-list-name">Track list name</label>
         <input
@@ -316,11 +575,14 @@ export function CreateTrackListForm({
         {songs.length} song{songs.length === 1 ? "" : "s"} ·{" "}
         {formatBytes(totalAudioBytes)} /{" "}
         {formatBytes(uploadLimits.maxTemplateAudioBytes)}
+        {editId ? " · editing" : ""}
       </p>
 
       <div className="song-rows">
         {songs.map((song, index) => {
-          const ready = Boolean(song.pick && song.audio?.file);
+          const ready = Boolean(
+            song.pick && (song.audio?.file || song.existingSongId),
+          );
           return (
             <div className="song-row song-row-multi" key={song.key}>
               <TrackPicker
@@ -352,10 +614,49 @@ export function CreateTrackListForm({
                 label={`Song ${index + 1} audio`}
                 value={song.audio}
                 disabled={busy}
+                existingClip={song.existingClip}
+                segmentPointsSec={song.segmentPointsSec}
+                onSegmentPointsChange={(segmentPointsSec) => {
+                  setSongs((prev) =>
+                    prev.map((s) =>
+                      s.key === song.key ? { ...s, segmentPointsSec } : s,
+                    ),
+                  );
+                }}
+                onClearExisting={() => {
+                  setSongs((prev) =>
+                    prev.map((s) =>
+                      s.key === song.key
+                        ? {
+                            ...s,
+                            existingSongId: undefined,
+                            existingClip: null,
+                            segmentPointsSec: [],
+                          }
+                        : s,
+                    ),
+                  );
+                }}
                 onChange={(audio) => {
                   setSongs((prev) =>
                     prev.map((s) =>
-                      s.key === song.key ? { ...s, audio } : s,
+                      s.key === song.key
+                        ? {
+                            ...s,
+                            audio,
+                            existingSongId: audio ? undefined : s.existingSongId,
+                            durationMs: audio
+                              ? Math.round(
+                                  (audio.endSec - audio.startSec) * 1000,
+                                )
+                              : s.durationMs,
+                            segmentPointsSec: audio
+                              ? audio.segmentPointsSec.map(
+                                  (p) => p + audio.startSec,
+                                )
+                              : s.segmentPointsSec,
+                          }
+                        : s,
                     ),
                   );
                 }}
@@ -401,7 +702,11 @@ export function CreateTrackListForm({
           </button>
         )}
         <button className="btn" type="submit" disabled={!canSave}>
-          {busy ? "Saving…" : "Save track list"}
+          {busy
+            ? "Saving…"
+            : editId
+              ? "Save changes"
+              : "Save track list"}
         </button>
       </div>
 

@@ -129,7 +129,11 @@ export async function POST(
     }
   }
 
-  const points = correct ? pointsForClip(session.clip_ms) : 0;
+  const extendCount =
+    session.extend_count != null && Number.isFinite(Number(session.extend_count))
+      ? Number(session.extend_count)
+      : null;
+  const points = correct ? pointsForClip(session.clip_ms, extendCount) : 0;
   const guessId = newId();
 
   // Unique index enforces one guess per round; concurrent inserts lose the race.
